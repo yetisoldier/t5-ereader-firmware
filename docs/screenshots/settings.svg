@@ -1,0 +1,61 @@
+<svg width="480" height="640" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="480" height="640" fill="#f5f5f5"/>
+  
+  <!-- Header -->
+  <rect width="480" height="50" fill="#e0e0e0"/>
+  <text x="240" y="35" font-size="24" font-weight="bold" text-anchor="middle" fill="#000">Settings</text>
+  
+  <!-- Settings entries -->
+  <!-- Font Size -->
+  <rect x="0" y="60" width="480" height="50" fill="#fff" stroke="#ddd" stroke-width="1"/>
+  <text x="20" y="75" font-size="13" font-weight="bold" fill="#000">Font Size</text>
+  <text x="20" y="95" font-size="11" fill="#666">Small • Medium • Large</text>
+  <text x="460" y="85" font-size="12" text-anchor="end" fill="#000">▶</text>
+  
+  <!-- Sleep Timeout -->
+  <rect x="0" y="110" width="480" height="50" fill="#fff" stroke="#ddd" stroke-width="1"/>
+  <text x="20" y="125" font-size="13" font-weight="bold" fill="#000">Sleep Timeout</text>
+  <text x="20" y="145" font-size="11" fill="#666">5 minutes</text>
+  <text x="460" y="135" font-size="12" text-anchor="end" fill="#000">▶</text>
+  
+  <!-- Refresh Mode -->
+  <rect x="0" y="160" width="480" height="50" fill="#fff" stroke="#ddd" stroke-width="1"/>
+  <text x="20" y="175" font-size="13" font-weight="bold" fill="#000">Refresh Mode</text>
+  <text x="20" y="195" font-size="11" fill="#666">Medium (recommended)</text>
+  <text x="460" y="185" font-size="12" text-anchor="end" fill="#000">▶</text>
+  
+  <!-- Library View -->
+  <rect x="0" y="210" width="480" height="50" fill="#fff" stroke="#ddd" stroke-width="1"/>
+  <text x="20" y="225" font-size="13" font-weight="bold" fill="#000">Library View</text>
+  <text x="20" y="245" font-size="11" fill="#666">Poster • List</text>
+  <text x="460" y="235" font-size="12" text-anchor="end" fill="#000">▶</text>
+  
+  <!-- WiFi -->
+  <rect x="0" y="260" width="480" height="50" fill="#fff" stroke="#ddd" stroke-width="1"/>
+  <text x="20" y="275" font-size="13" font-weight="bold" fill="#000">WiFi Settings</text>
+  <text x="20" y="295" font-size="11" fill="#666">SSID: crazy (connected)</text>
+  <text x="460" y="285" font-size="12" text-anchor="end" fill="#000">▶</text>
+  
+  <!-- Display Options -->
+  <rect x="0" y="310" width="480" height="50" fill="#fff" stroke="#ddd" stroke-width="1"/>
+  <text x="20" y="325" font-size="13" font-weight="bold" fill="#000">Display</text>
+  <text x="20" y="345" font-size="11" fill="#666">Battery indicator • Page numbers</text>
+  <text x="460" y="335" font-size="12" text-anchor="end" fill="#000">▶</text>
+  
+  <!-- Reset Tap Layout -->
+  <rect x="0" y="360" width="480" height="50" fill="#fff" stroke="#ddd" stroke-width="1"/>
+  <text x="20" y="375" font-size="13" font-weight="bold" fill="#000">Tap Zones</text>
+  <text x="20" y="395" font-size="11" fill="#666">Left/Right • Top/Bottom</text>
+  <text x="460" y="385" font-size="12" text-anchor="end" fill="#000">▶</text>
+  
+  <!-- About -->
+  <rect x="0" y="410" width="480" height="50" fill="#fff" stroke="#ddd" stroke-width="1"/>
+  <text x="20" y="425" font-size="13" font-weight="bold" fill="#000">About</text>
+  <text x="20" y="445" font-size="11" fill="#666">T5 E-Reader v0.1.0</text>
+  <text x="460" y="435" font-size="12" text-anchor="end" fill="#000">▶</text>
+  
+  <!-- Footer hint -->
+  <rect y="590" width="480" height="50" fill="#e0e0e0"/>
+  <text x="240" y="615" font-size="11" text-anchor="middle" fill="#666">Tap entry to change • Hold button to exit</text>
+</svg>

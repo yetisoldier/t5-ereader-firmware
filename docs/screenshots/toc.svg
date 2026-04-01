@@ -1,0 +1,57 @@
+<svg width="480" height="640" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="480" height="640" fill="#f5f5f5"/>
+  
+  <!-- Header -->
+  <rect width="480" height="50" fill="#e0e0e0"/>
+  <text x="240" y="35" font-size="24" font-weight="bold" text-anchor="middle" fill="#000">Contents</text>
+  
+  <!-- Book info -->
+  <text x="20" y="75" font-size="12" font-weight="bold" fill="#000">The Great Gatsby</text>
+  <text x="20" y="92" font-size="10" fill="#666">F. Scott Fitzgerald</text>
+  
+  <!-- TOC entries -->
+  <!-- Chapter 1 -->
+  <rect x="0" y="110" width="480" height="40" fill="#fff" stroke="#ddd" stroke-width="1"/>
+  <text x="20" y="130" font-size="12" fill="#000">Chapter 1</text>
+  <text x="20" y="145" font-size="10" fill="#999">page 5</text>
+  
+  <!-- Chapter 2 -->
+  <rect x="0" y="150" width="480" height="40" fill="#fff" stroke="#ddd" stroke-width="1"/>
+  <text x="20" y="170" font-size="12" fill="#000">Chapter 2</text>
+  <text x="20" y="185" font-size="10" fill="#999">page 31</text>
+  
+  <!-- Chapter 3 - current -->
+  <rect x="0" y="190" width="480" height="40" fill="#e8e8e8" stroke="#000" stroke-width="2"/>
+  <text x="20" y="210" font-size="12" font-weight="bold" fill="#000">▶ Chapter 3</text>
+  <text x="20" y="225" font-size="10" fill="#666">page 47 (current)</text>
+  
+  <!-- Chapter 4 -->
+  <rect x="0" y="230" width="480" height="40" fill="#fff" stroke="#ddd" stroke-width="1"/>
+  <text x="20" y="250" font-size="12" fill="#000">Chapter 4</text>
+  <text x="20" y="265" font-size="10" fill="#999">page 68</text>
+  
+  <!-- Chapter 5 -->
+  <rect x="0" y="270" width="480" height="40" fill="#fff" stroke="#ddd" stroke-width="1"/>
+  <text x="20" y="290" font-size="12" fill="#000">Chapter 5</text>
+  <text x="20" y="305" font-size="10" fill="#999">page 92</text>
+  
+  <!-- Chapter 6 -->
+  <rect x="0" y="310" width="480" height="40" fill="#fff" stroke="#ddd" stroke-width="1"/>
+  <text x="20" y="330" font-size="12" fill="#000">Chapter 6</text>
+  <text x="20" y="345" font-size="10" fill="#999">page 115</text>
+  
+  <!-- Chapter 7 -->
+  <rect x="0" y="350" width="480" height="40" fill="#fff" stroke="#ddd" stroke-width="1"/>
+  <text x="20" y="370" font-size="12" fill="#000">Chapter 7</text>
+  <text x="20" y="385" font-size="10" fill="#999">page 138</text>
+  
+  <!-- Epilogue -->
+  <rect x="0" y="390" width="480" height="40" fill="#fff" stroke="#ddd" stroke-width="1"/>
+  <text x="20" y="410" font-size="12" fill="#000">Epilogue</text>
+  <text x="20" y="425" font-size="10" fill="#999">page 171</text>
+  
+  <!-- Footer hint -->
+  <rect y="590" width="480" height="50" fill="#e0e0e0"/>
+  <text x="240" y="615" font-size="11" text-anchor="middle" fill="#666">Tap chapter to jump • Hold to close</text>
+</svg>

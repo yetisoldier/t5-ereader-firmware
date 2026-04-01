@@ -1,0 +1,84 @@
+#pragma once
+
+// ─── WiFi Credentials ───────────────────────────────────────────────
+// Copy this file to config.h and fill in your WiFi details.
+// WiFi is used for the wireless book upload feature.
+#define WIFI_SSID "your-wifi-ssid"
+#define WIFI_PASS "your-wifi-password"
+
+// ─── Display (ED047TC1 via epdiy / LilyGo-EPD47) ────────────────────
+// Physical: 960x540 landscape. We render portrait (540x960) and rotate.
+#define PHYS_WIDTH   960
+#define PHYS_HEIGHT  540
+#define PORTRAIT_W   540
+#define PORTRAIT_H   960
+
+// Legacy aliases — all UI code uses portrait dimensions
+#define DISPLAY_WIDTH  PORTRAIT_W
+#define DISPLAY_HEIGHT PORTRAIT_H
+
+// ─── GT911 Touch (I2C on Wire, polling mode) ─────────────────────────
+#define TOUCH_SDA  18
+#define TOUCH_SCL  17
+#define TOUCH_INT_PIN  47   // GPIO 47 on T5 V2.4 (ESP32-S3) — required for wake
+#define TOUCH_RST  -1       // RST uses hardware pull-up, no GPIO control
+#define TOUCH_ADDR 0x5D
+
+// ─── SD Card (SPI) ──────────────────────────────────────────────────
+#ifndef SD_CS
+#define SD_CS    42
+#endif
+#ifndef SD_MOSI
+#define SD_MOSI  15
+#endif
+#ifndef SD_MISO
+#define SD_MISO  16
+#endif
+#ifndef SD_SCLK
+#define SD_SCLK  11
+#endif
+
+// ─── Battery ADC ────────────────────────────────────────────────────
+#ifndef BATT_PIN
+#define BATT_PIN 14
+#endif
+
+// ─── PCF8563 RTC (shares I2C bus with touch) ────────────────────────
+#define RTC_SDA  18
+#define RTC_SCL  17
+
+// ─── Button (wake from deep sleep) ──────────────────────────────────
+#define BUTTON_PIN 21
+
+// ─── epdiy I2C bus (PCA9555 power control — library internal) ───────
+#define EPD_I2C_SDA 39
+#define EPD_I2C_SCL 40
+
+// ─── UI Layout Constants (portrait 540x960) ────────────────────────
+#define MARGIN_X       30
+#define MARGIN_Y       16
+#define HEADER_HEIGHT  66
+#define FOOTER_HEIGHT  50
+#define LINE_SPACING   4
+#define PROGRESS_BAR_H 4
+
+// ─── Font Size Presets (line spacing + margins) ────────────────────
+// fontSize=0 (Small): tighter spacing, narrower margins
+// fontSize=1 (Medium): default
+// fontSize=2 (Large): wider spacing, wider margins
+#define FONT_LINE_SPACING_SMALL   0
+#define FONT_LINE_SPACING_MEDIUM  1
+#define FONT_LINE_SPACING_LARGE   4
+#define FONT_MARGIN_X_SMALL       20
+#define FONT_MARGIN_X_MEDIUM      30
+#define FONT_MARGIN_X_LARGE       40
+
+// ─── Timeouts ───────────────────────────────────────────────────────
+#define SLEEP_TIMEOUT_MS  (5 * 60 * 1000)
+#define TOUCH_POLL_MS     50
+
+// ─── Book Storage ───────────────────────────────────────────────────
+#define BOOKS_DIR      "/books"
+#define PROGRESS_DIR   "/books/.progress"
+#define SLEEP_IMAGES_DIR "/sleep_images"
+#define MAX_BOOKS      100

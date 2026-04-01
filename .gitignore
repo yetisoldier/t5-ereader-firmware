@@ -1,0 +1,26 @@
+# PlatformIO build artifacts
+.pio/
+build/
+
+# User-specific config (contains WiFi credentials)
+include/config.h
+
+# IDE settings
+.vscode/
+.idea/
+
+# Compiled binaries
+*.bin
+*.elf
+*.hex
+*.map
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Claude Code
+.claude/
+
+# Debug / temp files
+test_sleep_images/
