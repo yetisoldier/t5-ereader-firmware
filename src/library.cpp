@@ -10,6 +10,22 @@ static bool _mounted = false;
 static const char* CACHE_PATH = "/books/.library_cache.json";
 static const char* CACHE_TMP_PATH = "/books/.library_cache.tmp";
 
+static bool ensure_dir(const char* path, const char* label) {
+    if (SD.exists(path)) {
+        Serial.printf("Storage: %s ready: %s\n", label, path);
+        return true;
+    }
+
+    Serial.printf("Storage: %s missing, creating: %s\n", label, path);
+    if (SD.mkdir(path)) {
+        Serial.printf("Storage: %s created: %s\n", label, path);
+        return true;
+    }
+
+    Serial.printf("Storage: failed to create %s: %s\n", label, path);
+    return false;
+}
+
 bool library_init() {
     SPI.begin(SD_SCLK, SD_MISO, SD_MOSI, SD_CS);
     if (!SD.begin(SD_CS, SPI)) {
@@ -20,15 +36,14 @@ bool library_init() {
     uint64_t cardSize = SD.cardSize() / (1024 * 1024);
     Serial.printf("SD card: %llu MB\n", cardSize);
 
-    // Ensure books directory exists
-    if (!SD.exists(BOOKS_DIR)) {
-        SD.mkdir(BOOKS_DIR);
-    }
-    if (!SD.exists(PROGRESS_DIR)) {
-        SD.mkdir(PROGRESS_DIR);
-    }
-    if (!SD.exists(SLEEP_IMAGES_DIR)) {
-        SD.mkdir(SLEEP_IMAGES_DIR);
+    bool storageReady = true;
+    storageReady &= ensure_dir(BOOKS_DIR, "books library");
+    storageReady &= ensure_dir(PROGRESS_DIR, "reading progress cache");
+    storageReady &= ensure_dir(LINE_CACHE_DIR, "line cache");
+    storageReady &= ensure_dir(SLEEP_IMAGES_DIR, "sleep images");
+
+    if (!storageReady) {
+        Serial.println("Storage: one or more app folders are unavailable; continuing with existing fallbacks");
     }
 
     _mounted = true;

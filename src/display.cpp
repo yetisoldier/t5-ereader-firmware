@@ -133,7 +133,7 @@ void display_clear() {
 
     epd_poweron();
     epd_clear();
-    epd_poweroff();
+    epd_poweroff_all();
 
     _partialCount = 0;
 }
@@ -284,6 +284,24 @@ void display_update() {
     epd_poweron();
     epd_clear_area_cycles(epd_full_screen(), 6, 50);
     epd_draw_grayscale_image(epd_full_screen(), _lfb);
+    epd_poweroff_all();  // zero all control bits — fully silences TPS65185 oscillator
+
+    _partialCount = 0;
+}
+
+// Sleep refresh: preserve the panel's normal post-refresh hold state so the
+// sleep image remains latched correctly while the MCU enters deep sleep.
+void display_update_sleep() {
+    if (!_pfb || !_lfb) return;
+
+    unsigned long t0 = millis();
+    rotatePortraitToLandscape();
+    unsigned long t1 = millis();
+    Serial.printf("Sleep rotation: %lums\n", t1 - t0);
+
+    epd_poweron();
+    epd_clear_area_cycles(epd_full_screen(), 6, 50);
+    epd_draw_grayscale_image(epd_full_screen(), _lfb);
     epd_poweroff();
 
     _partialCount = 0;
@@ -302,7 +320,7 @@ void display_update_medium() {
     epd_poweron();
     epd_clear_area_cycles(epd_full_screen(), 2, 50);
     epd_draw_grayscale_image(epd_full_screen(), _lfb);
-    epd_poweroff();
+    epd_poweroff_all();  // zero all control bits — fully silences TPS65185 oscillator
 
     _partialCount = 0;
 }
@@ -320,7 +338,7 @@ void display_update_fast() {
     epd_poweron();
     epd_clear_area_cycles(epd_full_screen(), 1, 40);
     epd_draw_grayscale_image(epd_full_screen(), _lfb);
-    epd_poweroff();
+    epd_poweroff_all();  // zero all control bits — fully silences TPS65185 oscillator
 
     _partialCount = 0;
 }
@@ -345,7 +363,7 @@ void display_update_reader_body(int x, int y, int w, int h, bool strongCleanup) 
     epd_poweron();
     epd_clear_area_cycles(area, strongCleanup ? 2 : 1, strongCleanup ? 40 : 30);
     epd_draw_grayscale_image(area, region);
-    epd_poweroff();
+    epd_poweroff_all();
 
 
     free(region);
@@ -361,7 +379,7 @@ void display_update_partial() {
 
     epd_poweron();
     epd_draw_grayscale_image(epd_full_screen(), _lfb);
-    epd_poweroff();
+    epd_poweroff_all();
 
     _partialCount++;
 }
@@ -412,5 +430,5 @@ void display_set_font_size(int size) {
 }
 
 void display_power_off() {
-    epd_poweroff();
+    epd_poweroff_all();  // zero all control bits for full TPS65185 standby
 }

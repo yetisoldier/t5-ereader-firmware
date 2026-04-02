@@ -10,6 +10,10 @@
 #include "sleep_image.h"
 #include "wifi_upload.h"
 #include "inline_image.h"
+#include "ota_update.h"
+#include "gnome_splash.h"
+#include <WiFi.h>
+#include <Preferences.h>
 
 // ─── App State ──────────────────────────────────────────────────────
 enum AppState {
@@ -20,14 +24,18 @@ enum AppState {
     STATE_MENU,         // redesigned reader overlay menu
     STATE_TOC,          // table of contents
     STATE_BOOKMARKS,    // bookmark list
-    STATE_SETTINGS      // settings page
+    STATE_SETTINGS,     // settings page
+    STATE_OTA_CHECK     // OTA update check / download
 };
 
 static AppState       appState = STATE_BOOT;
+static bool           firstLibraryDraw = true;  // full refresh after splash to clear ghost
+static bool           settingsFromLibrary = false;  // quicker refresh on library→settings transition
 static unsigned long  lastActivity = 0;
 static bool           needsRedraw = true;
 static bool           readerFastRefresh = false;
 static bool           readerChapterJump = false;   // use medium refresh after chapter/bookmark jump
+static bool           readerForceFullRefresh = false;  // full refresh on wake resume
 static int            readerPageTurnsSinceFull = 0;
 static const int      READER_REFRESH_OVERDRAW_PX = 16;
 
@@ -47,16 +55,21 @@ static unsigned long touchDownTime = 0;
 static bool touchHandled = false;
 static const unsigned long LONG_PRESS_MS = 800;
 
-// ─── Power button (top button / GPIO 21 / BUTTON_1 in LilyGo examples) ─────
-static unsigned long buttonDownTime = 0;
-static bool buttonWasPressed = false;
+// ─── Top button (GPIO 21): single=next, double=prev, long=sleep ────
+static unsigned long btnDownTime = 0;
+static bool btnWasPressed = false;
+static unsigned long lastBtnReleaseTime = 0;
+static int btnPressCount = 0;
 static const unsigned long BUTTON_DEBOUNCE_MS = 50;
-static const unsigned long BUTTON_POWER_MS = 600;  // hold 600ms to power off
-
-// ─── Center button: single/double press for page navigation ─────────
-static unsigned long lastButtonReleaseTime = 0;
-static int buttonPressCount = 0;
+static const unsigned long BUTTON_POWER_MS = 600;   // hold 600ms to sleep
 static const unsigned long DOUBLE_PRESS_WINDOW_MS = 400;
+
+// ─── OTA state ──────────────────────────────────────────────────────
+enum OtaPhase { OTA_IDLE, OTA_CHECKING, OTA_RESULT, OTA_DOWNLOADING, OTA_DONE, OTA_FAILED };
+static OtaPhase   otaPhase = OTA_IDLE;
+static String      otaLatestVersion;
+static bool        otaUpdateAvailable = false;
+static int         otaProgress = 0;
 
 // ─── Layout helpers ─────────────────────────────────────────────────
 static const int W = PORTRAIT_W;
@@ -74,7 +87,26 @@ static const int BOOK_ITEM_H = FONT_H * 2 + 12;  // title + info + padding
 static const int MENU_ITEM_H = FONT_H + 24;
 
 // Settings row height
-static const int SETTINGS_ROW_H = FONT_H + 20;
+static const int SETTINGS_ROW_H = FONT_H + 8;   // 58px — fits 12 rows + reset in 818px available
+
+static void showWakeFeedback() {
+    const int bannerH = 110;
+    const int y = H - bannerH;
+
+    display_draw_filled_rect(0, y, W, bannerH, 15);
+    display_draw_hline(0, y, W, 10);
+
+    const char* line1 = "Waking...";
+    int w1 = display_text_width(line1);
+    display_draw_text((W - w1) / 2, y + 42, line1, 2);
+
+    display_draw_filled_rect(80, y + 76, W - 160, 8, 12);
+    display_draw_filled_rect(80, y + 76, (W - 160) / 3, 8, 4);
+
+    // Update only the banner so the sleep image remains visible elsewhere,
+    // giving immediate confirmation that the wake button press was accepted.
+    display_update_reader_body(0, y, W, bannerH, false);
+}
 
 static void enterDeepSleep(bool triggeredByButton = false);
 
@@ -117,6 +149,19 @@ static void drawBottomBarSplit(const char* left, const char* right) {
     // Right label
     int rw = display_text_width(right);
     display_draw_text(W * 3 / 4 - rw / 2, barY + FOOTER_HEIGHT - 12, right, 3);
+}
+
+static void drawGnomeSplash() {
+    display_fill_screen(15);
+
+    for (int y = 0; y < SPLASH_HEIGHT; ++y) {
+        int rowOffset = y * ((SPLASH_WIDTH + 7) / 8);
+        for (int x = 0; x < SPLASH_WIDTH; ++x) {
+            uint8_t byte = pgm_read_byte(&GNOME_SPLASH_BITMAP[rowOffset + (x / 8)]);
+            bool black = (byte & (0x80 >> (x & 7))) == 0;
+            display_draw_pixel(x, y, black ? 0 : 15);
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -385,7 +430,12 @@ static void drawLibraryScreen() {
 
     drawBottomBar("[ Settings ]");
 
-    display_update_fast();
+    if (firstLibraryDraw) {
+        firstLibraryDraw = false;
+        display_update();  // full refresh after splash — clears e-ink ghost
+    } else {
+        display_update_medium();  // 2-cycle refresh — quieter than fast (less boost converter switching)
+    }
     needsRedraw = false;
 }
 
@@ -517,12 +567,12 @@ static void drawReaderScreen() {
     // Reader uses a CrossPoint-style hybrid: fast localized cleanup for the
     // reading body on ordinary page turns, with periodic stronger body-only
     // cleanup to keep ghosting from accumulating.
-    if (readerFastRefresh) {
-        // Use full-screen fast refresh for page turns.  The previous approach
-        // extracted a rotated sub-region and pushed only the body area via
-        // epd_draw_grayscale_image, but the coordinate mapping produced blank
-        // regions on some displays.  Full-screen fast refresh is reliable and
-        // the visual penalty is minimal (light 1-cycle clear).
+    if (readerForceFullRefresh) {
+        // Full refresh to cleanly replace sleep image on wake resume
+        display_update();
+        readerForceFullRefresh = false;
+        readerPageTurnsSinceFull = 0;
+    } else if (readerFastRefresh) {
         int refreshInterval = settings_get().refreshEveryPages;
         if (refreshInterval < 1) refreshInterval = 4;
         bool strongCleanup = (readerPageTurnsSinceFull + 1 >= refreshInterval);
@@ -708,7 +758,7 @@ static void drawTocScreen() {
     }
 
     drawBottomBar("[ Back to Reading ]");
-    display_update_fast();
+    display_update();  // full refresh — clears ghost bleed
     needsRedraw = false;
 }
 
@@ -769,7 +819,7 @@ static void drawBookmarksScreen() {
     }
 
     drawBottomBar("[ Back to Reading ]");
-    display_update_fast();
+    display_update();  // full refresh — clears ghost bleed
     needsRedraw = false;
 }
 
@@ -902,6 +952,14 @@ static void drawSettingsScreen() {
     display_draw_hline(MARGIN_X, y + SETTINGS_ROW_H - 4, W - MARGIN_X * 2, 12);
     y += SETTINGS_ROW_H;
 
+    // Check for Update
+    display_draw_text(labelX, y + FONT_H - 4, "Firmware Update", 0);
+    const char* otaLabel = "[ Check ]";
+    int otaw = display_text_width(otaLabel);
+    display_draw_text(W - MARGIN_X - otaw, y + FONT_H - 4, otaLabel, 3);
+    display_draw_hline(MARGIN_X, y + SETTINGS_ROW_H - 4, W - MARGIN_X * 2, 12);
+    y += SETTINGS_ROW_H;
+
     // Reset Defaults button
     y += 20;
     const char* resetLabel = "[ Reset Defaults ]";
@@ -915,8 +973,214 @@ static void drawSettingsScreen() {
     display_draw_text(W - MARGIN_X - vw, y + FONT_H - 4, verLabel, 8);
 
     drawBottomBar("[ Back ]");
-    display_update_fast();
+    if (settingsFromLibrary) {
+        display_update_medium();  // quicker transition from library
+        settingsFromLibrary = false;
+    } else {
+        display_update();  // full refresh — clears ghost bleed from previous screen
+    }
     needsRedraw = false;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// OTA Update screen
+// ═══════════════════════════════════════════════════════════════════
+
+static void drawOtaScreen() {
+    display_fill_screen(15);
+    drawHeader("Firmware Update");
+
+    int cy = H / 2 - 40;  // vertical center area
+
+    switch (otaPhase) {
+        case OTA_CHECKING: {
+            const char* msg = "Checking for updates...";
+            int mw = display_text_width(msg);
+            display_draw_text((W - mw) / 2, cy, msg, 0);
+            drawBottomBar("[ Cancel ]");
+            display_update_fast();
+            needsRedraw = false;
+
+            // Perform the check now (blocking but quick)
+            if (WiFi.status() != WL_CONNECTED) {
+                // Need to connect WiFi first
+                Settings& s = settings_get();
+                WiFi.begin(s.wifiSSID.c_str(), s.wifiPass.c_str());
+                unsigned long start = millis();
+                while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
+                    delay(100);
+                }
+            }
+
+            if (WiFi.status() != WL_CONNECTED) {
+                otaPhase = OTA_FAILED;
+                otaLatestVersion = "Connect to WiFi first";
+                needsRedraw = true;
+                return;
+            }
+
+            otaUpdateAvailable = ota_check_for_update(otaLatestVersion);
+            otaPhase = OTA_RESULT;
+            needsRedraw = true;
+            return;
+        }
+
+        case OTA_RESULT: {
+            if (otaUpdateAvailable) {
+                char msg[64];
+                snprintf(msg, sizeof(msg), "%s available", otaLatestVersion.c_str());
+                int mw = display_text_width(msg);
+                display_draw_text((W - mw) / 2, cy, msg, 0);
+
+                const char* tap = "Tap to install";
+                int tw = display_text_width(tap);
+                display_draw_text((W - tw) / 2, cy + FONT_H + 16, tap, 3);
+                drawBottomBar("[ Back ]");
+            } else {
+                char msg[64];
+                snprintf(msg, sizeof(msg), "Up to date (v%s)", FIRMWARE_VERSION);
+                int mw = display_text_width(msg);
+                display_draw_text((W - mw) / 2, cy, msg, 0);
+                drawBottomBar("[ Back ]");
+            }
+            display_update_fast();
+            needsRedraw = false;
+            break;
+        }
+
+        case OTA_DOWNLOADING: {
+            const char* msg = "Downloading update...";
+            int mw = display_text_width(msg);
+            display_draw_text((W - mw) / 2, cy - 20, msg, 0);
+
+            // Progress bar
+            int barX = MARGIN_X + 20;
+            int barW = W - barX * 2;
+            int barY = cy + 30;
+            int barH = 16;
+            display_draw_rect(barX, barY, barW, barH, 0);
+            int fillW = (barW - 4) * otaProgress / 100;
+            if (fillW > 0) {
+                display_draw_filled_rect(barX + 2, barY + 2, fillW, barH - 4, 0);
+            }
+
+            char pctStr[16];
+            snprintf(pctStr, sizeof(pctStr), "%d%%", otaProgress);
+            int pw = display_text_width(pctStr);
+            display_draw_text((W - pw) / 2, barY + barH + 20, pctStr, 0);
+
+            display_update_fast();
+            needsRedraw = false;
+            break;
+        }
+
+        case OTA_DONE: {
+            const char* msg = "Update complete!";
+            int mw = display_text_width(msg);
+            display_draw_text((W - mw) / 2, cy, msg, 0);
+
+            const char* msg2 = "Restarting...";
+            int m2w = display_text_width(msg2);
+            display_draw_text((W - m2w) / 2, cy + FONT_H + 16, msg2, 3);
+
+            display_update();
+            needsRedraw = false;
+
+            delay(2000);
+            esp_restart();
+            break;
+        }
+
+        case OTA_FAILED: {
+            const char* msg = "Update failed";
+            int mw = display_text_width(msg);
+            display_draw_text((W - mw) / 2, cy, msg, 0);
+
+            if (otaLatestVersion.length() > 0) {
+                int lw = display_text_width(otaLatestVersion.c_str());
+                display_draw_text((W - lw) / 2, cy + FONT_H + 16, otaLatestVersion.c_str(), 6);
+            }
+
+            drawBottomBar("[ Back ]");
+            display_update_fast();
+            needsRedraw = false;
+            break;
+        }
+
+        default:
+            break;
+    }
+}
+
+static void handleOtaTouch(int x, int y) {
+    (void)x;
+
+    // Footer → back (cancel)
+    if (y > H - FOOTER_HEIGHT) {
+        otaPhase = OTA_IDLE;
+        appState = STATE_SETTINGS;
+        needsRedraw = true;
+        return;
+    }
+
+    // In result state with update available → start download
+    if (otaPhase == OTA_RESULT && otaUpdateAvailable) {
+        otaPhase = OTA_DOWNLOADING;
+        otaProgress = 0;
+        needsRedraw = true;
+
+        // Draw the initial download screen
+        drawOtaScreen();
+
+        // Perform the download (blocking with progress callbacks)
+        bool ok = ota_install_update([](int pct) {
+            otaProgress = pct;
+            // Redraw progress every 5%
+            if (pct % 5 == 0) {
+                display_fill_screen(15);
+                drawHeader("Firmware Update");
+
+                int cy = H / 2 - 40;
+                const char* msg = "Downloading update...";
+                int mw = display_text_width(msg);
+                display_draw_text((W - mw) / 2, cy - 20, msg, 0);
+
+                int barX = MARGIN_X + 20;
+                int barW = W - barX * 2;
+                int barY = cy + 30;
+                int barH = 16;
+                display_draw_rect(barX, barY, barW, barH, 0);
+                int fillW = (barW - 4) * pct / 100;
+                if (fillW > 0) {
+                    display_draw_filled_rect(barX + 2, barY + 2, fillW, barH - 4, 0);
+                }
+
+                char pctStr[16];
+                snprintf(pctStr, sizeof(pctStr), "%d%%", pct);
+                int pw = display_text_width(pctStr);
+                display_draw_text((W - pw) / 2, barY + barH + 20, pctStr, 0);
+
+                display_update_fast();
+            }
+        });
+
+        if (ok) {
+            otaPhase = OTA_DONE;
+        } else {
+            otaPhase = OTA_FAILED;
+            otaLatestVersion = "Try again later";
+        }
+        needsRedraw = true;
+        return;
+    }
+
+    // In failed state → back
+    if (otaPhase == OTA_FAILED || (otaPhase == OTA_RESULT && !otaUpdateAvailable)) {
+        otaPhase = OTA_IDLE;
+        appState = STATE_SETTINGS;
+        needsRedraw = true;
+        return;
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -970,6 +1234,7 @@ static void handleLibraryTouch(int x, int y) {
     // Bottom bar — settings only
     if (y > H - FOOTER_HEIGHT) {
         appState = STATE_SETTINGS;
+        settingsFromLibrary = true;
         needsRedraw = true;
         return;
     }
@@ -1361,13 +1626,20 @@ static void handleSettingsTouch(int x, int y) {
             case 10: // Battery Display toggle
                 s.showBattery = !s.showBattery;
                 break;
+            case 11: // Firmware Update — enter OTA check screen
+                otaPhase = OTA_CHECKING;
+                otaUpdateAvailable = false;
+                otaLatestVersion = "";
+                appState = STATE_OTA_CHECK;
+                needsRedraw = true;
+                return;
         }
         needsRedraw = true;
         return;
     }
 
-    // Reset Defaults row (below the 11 settings rows including preview)
-    int resetY = rowY + SETTINGS_ROW_H * 11 + 20;
+    // Reset Defaults row (below the 12 settings rows including preview)
+    int resetY = rowY + SETTINGS_ROW_H * 12 + 20;
     if (y >= resetY && y < resetY + FONT_H + 10) {
         settings_set_default();
         needsRedraw = true;
@@ -1400,12 +1672,47 @@ static void enterDeepSleep(bool triggeredByButton) {
         wifi_upload_stop();
     }
 
-    // If sleep was triggered by the same physical button that also wakes the
-    // device, wait for release first; otherwise it can appear to "restart"
-    // immediately because the wake condition is still asserted.
+    // Persist app state so wake can resume where we left off.
+    // Reader sub-screens (menu/TOC/bookmarks) resume to reader.
+    // Settings/WiFi/OTA resume to library (transient screens).
+    {
+        Preferences prefs;
+        prefs.begin("ereader", false);
+
+        int resumeState = (int)appState;
+        // Collapse reader overlay states back to reader
+        if (appState == STATE_MENU || appState == STATE_TOC || appState == STATE_BOOKMARKS) {
+            resumeState = (int)STATE_READER;
+        }
+        // Transient states resume to library
+        if (appState == STATE_WIFI || appState == STATE_OTA_CHECK || appState == STATE_SETTINGS) {
+            resumeState = (int)STATE_LIBRARY;
+        }
+        prefs.putInt("sleepState", resumeState);
+        prefs.putInt("sleepLibScrl", libraryScroll);
+
+        // Persist open book filepath so we can reopen it on wake
+        if (reader.getFilepath().length() > 0) {
+            prefs.putString("sleepBook", reader.getFilepath());
+        } else {
+            prefs.putString("sleepBook", "");
+        }
+
+        // Book is stable at sleep time — reset crash guard
+        prefs.putInt("crashCount", 0);
+
+        Serial.printf("Sleep: saved state=%d libScrl=%d book=%s\n",
+            resumeState, libraryScroll, reader.getFilepath().c_str());
+        prefs.end();
+    }
+
+    // If sleep was triggered by a physical button, wait for ALL buttons to
+    // release first; otherwise the device can appear to restart immediately
+    // because the wake condition is still asserted.
     if (triggeredByButton) {
         unsigned long waitStart = millis();
-        while (digitalRead(BUTTON_PIN) == LOW && millis() - waitStart < 2000) {
+        while (digitalRead(BUTTON_PIN) == LOW
+               && millis() - waitStart < 2000) {
             delay(10);
         }
         delay(60);
@@ -1417,7 +1724,7 @@ static void enterDeepSleep(bool triggeredByButton) {
         const char* msg = "Sleeping...";
         int mw = display_text_width(msg);
         display_draw_text((W - mw) / 2, H / 2, msg, 6);
-        display_update();
+        display_update_sleep();
     }
 
     esp_sleep_enable_ext1_wakeup(1ULL << BUTTON_PIN, ESP_EXT1_WAKEUP_ALL_LOW);
@@ -1432,24 +1739,33 @@ void setup() {
     Serial.begin(115200);
     delay(500);
     Serial.println("\n=== T5 E-Reader Firmware (Portrait) ===");
-    Serial.printf("Wakeup cause: %d\n", (int)esp_sleep_get_wakeup_cause());
 
-    // Top button on the T5 board is GPIO 21 (BUTTON_1 in LilyGo examples).
-    // It is active LOW.
+    esp_sleep_wakeup_cause_t wakeReason = esp_sleep_get_wakeup_cause();
+    bool wakingFromSleep = (wakeReason == ESP_SLEEP_WAKEUP_EXT1 ||
+                            wakeReason == ESP_SLEEP_WAKEUP_TIMER);
+    Serial.printf("Wakeup cause: %d (fromSleep=%d)\n", (int)wakeReason, wakingFromSleep);
+
+    // Top button is sleep / wake; middle button is for page turns.
+    // Both are active LOW.
     pinMode(BUTTON_PIN, INPUT_PULLUP);
+    // PAGE_BUTTON_PIN removed — top button (GPIO 21) handles all input
 
     display_init();
-    display_clear();
 
-    // Boot screen
-    display_fill_screen(15);
-    const char* bootTitle = "E-Reader";
-    int btw = display_text_width(bootTitle);
-    display_draw_text((W - btw) / 2, H / 2 - 20, bootTitle, 0);
-    const char* bootSub = "Starting...";
-    int bsw = display_text_width(bootSub);
-    display_draw_text((W - bsw) / 2, H / 2 + 40, bootSub, 6);
-    display_update();
+    if (wakingFromSleep) {
+        showWakeFeedback();
+    }
+
+    if (!wakingFromSleep) {
+        // Cold boot: show gnome splash screen.
+        display_clear();
+        drawGnomeSplash();
+        display_update();
+    }
+    // Wake path: do NOT call display_clear() — the sleep image is still
+    // latched on the panel.  The first drawXxxScreen() call will overwrite
+    // the framebuffer and push a full refresh, which cleanly replaces the
+    // sleep image with the restored UI.
 
     battery_init();
     Serial.printf("Battery: %.2fV (%d%%)\n", battery_voltage(), battery_percent());
@@ -1476,9 +1792,90 @@ void setup() {
     wifi_upload_init();
     wifi_upload_set_reader(&reader);
 
-    appState = STATE_LIBRARY;
+    // Restore state from before deep sleep, or default to library
+    if (wakingFromSleep) {
+        Preferences prefs;
+        prefs.begin("ereader", true);  // read-only
+        int savedState = prefs.getInt("sleepState", (int)STATE_LIBRARY);
+        libraryScroll = prefs.getInt("sleepLibScrl", 0);
+        String savedBook = prefs.getString("sleepBook", "");
+        prefs.end();
+
+        Serial.printf("Wake: restoring state=%d libScrl=%d book=%s\n",
+            savedState, libraryScroll, savedBook.c_str());
+
+        // Clamp libraryScroll to valid range
+        if (libraryScroll < 0) libraryScroll = 0;
+        if (libraryScroll >= (int)books.size()) libraryScroll = 0;
+
+        bool resumedReader = false;
+        if (savedState == (int)STATE_READER && savedBook.length() > 0) {
+            // ── Crash guard: increment count BEFORE the risky openBook call ──
+            {
+                Preferences cgPrefs;
+                cgPrefs.begin("ereader", false);
+                int crashCount = cgPrefs.getInt("crashCount", 0);
+                crashCount++;
+                cgPrefs.putInt("crashCount", crashCount);
+                cgPrefs.end();
+
+                if (crashCount >= 2) {
+                    Serial.println("Crash guard triggered: clearing saved book");
+                    Preferences clrPrefs;
+                    clrPrefs.begin("ereader", false);
+                    clrPrefs.putString("sleepBook", "");
+                    clrPrefs.putInt("crashCount", 0);
+                    clrPrefs.end();
+                    savedBook = "";
+                }
+            }
+
+            if (savedBook.length() > 0) {
+                // Reopen the book — openBook() calls loadProgress() internally,
+                // which restores chapter + page from the progress JSON on SD.
+                if (reader.openBook(savedBook.c_str())) {
+                    // Book opened successfully — reset crash guard
+                    Preferences okPrefs;
+                    okPrefs.begin("ereader", false);
+                    okPrefs.putInt("crashCount", 0);
+                    okPrefs.end();
+
+                    appState = STATE_READER;
+                    readerFastRefresh = false;
+                    readerForceFullRefresh = true;
+                    readerPageTurnsSinceFull = 0;
+                    resumedReader = true;
+                    Serial.printf("Wake: resumed reader — %s ch%d pg%d\n",
+                        reader.getTitle().c_str(),
+                        reader.getCurrentChapter(), reader.getCurrentPage());
+                } else {
+                    Serial.printf("Wake: failed to reopen %s, falling back to library\n",
+                        savedBook.c_str());
+                }
+            }
+        }
+
+        if (!resumedReader) {
+            appState = STATE_LIBRARY;
+        }
+
+        // Draw the restored screen immediately after the wake banner so the
+        // user gets instant acknowledgement first, then the restored content.
+        firstLibraryDraw = true;
+        needsRedraw = true;
+        if (appState == STATE_READER) {
+            drawReaderScreen();
+        } else {
+            drawLibraryScreen();
+        }
+        needsRedraw = false;
+        Serial.println("Wake: immediate screen draw complete");
+    } else {
+        appState = STATE_LIBRARY;
+        needsRedraw = true;
+    }
+
     lastActivity = millis();
-    needsRedraw = true;
 
     Serial.println("Setup complete");
 }
@@ -1544,38 +1941,40 @@ void loop() {
         wifi_upload_handle();
     }
 
-    // Poll top button (GPIO 21) — active LOW
-    // Hold = sleep, single press = next page, double press = prev page
-    bool buttonPressed = (digitalRead(BUTTON_PIN) == LOW);
-    if (buttonPressed && !buttonWasPressed) {
-        buttonDownTime = millis();
-    } else if (buttonPressed && buttonWasPressed) {
-        unsigned long heldMs = millis() - buttonDownTime;
-        if (heldMs >= BUTTON_DEBOUNCE_MS && heldMs >= BUTTON_POWER_MS) {
-            Serial.println("Top button held — entering deep sleep");
+    // Poll top button (GPIO 21): single=next page, double=prev page, hold=sleep — active LOW
+    bool btnPressed = (digitalRead(BUTTON_PIN) == LOW);
+    if (btnPressed && !btnWasPressed) {
+        // Fresh press
+        btnDownTime = millis();
+    } else if (btnPressed && btnWasPressed) {
+        // Still held — check for long-press sleep trigger
+        unsigned long heldMs = millis() - btnDownTime;
+        if (heldMs >= BUTTON_POWER_MS) {
+            Serial.println("Top button long-press — entering deep sleep");
+            btnPressCount = 0;  // clear any queued presses
             enterDeepSleep(true);
         }
-    } else if (!buttonPressed && buttonWasPressed) {
-        // Button released — count presses for single/double detection
-        unsigned long heldMs = millis() - buttonDownTime;
+    } else if (!btnPressed && btnWasPressed) {
+        // Released — only count as tap if it wasn't a long-press
+        unsigned long heldMs = millis() - btnDownTime;
         if (heldMs >= BUTTON_DEBOUNCE_MS && heldMs < BUTTON_POWER_MS) {
-            buttonPressCount++;
-            lastButtonReleaseTime = millis();
+            btnPressCount++;
+            lastBtnReleaseTime = millis();
         }
     }
-    buttonWasPressed = buttonPressed;
+    btnWasPressed = btnPressed;
 
-    // Resolve single vs double press after the double-press window expires
-    if (buttonPressCount > 0 && !buttonPressed &&
-        (millis() - lastButtonReleaseTime >= DOUBLE_PRESS_WINDOW_MS)) {
-        if (buttonPressCount >= 2) {
-            Serial.println("Button double-press — previous page");
+    // Resolve single vs double press after the window expires
+    if (btnPressCount > 0 && !btnPressed &&
+        (millis() - lastBtnReleaseTime >= DOUBLE_PRESS_WINDOW_MS)) {
+        if (btnPressCount >= 2) {
+            Serial.println("Top button double-press — previous page");
             buttonPageBackward();
         } else {
-            Serial.println("Button single-press — next page");
+            Serial.println("Top button single-press — next page");
             buttonPageForward();
         }
-        buttonPressCount = 0;
+        btnPressCount = 0;
     }
 
     // Poll touch with long-press detection
@@ -1670,6 +2069,7 @@ void loop() {
                     case STATE_TOC:       handleTocTouch(tx, ty);               break;
                     case STATE_BOOKMARKS: handleBookmarksTouch(tx, ty);         break;
                     case STATE_SETTINGS:  handleSettingsTouch(tx, ty);          break;
+                    case STATE_OTA_CHECK: handleOtaTouch(tx, ty);              break;
                     case STATE_WIFI:      handleWifiTouch(tx, ty);              break;
                     default: break;
                 }
@@ -1687,6 +2087,7 @@ void loop() {
             case STATE_TOC:       drawTocScreen();       break;
             case STATE_BOOKMARKS: drawBookmarksScreen(); break;
             case STATE_SETTINGS:  drawSettingsScreen();  break;
+            case STATE_OTA_CHECK: drawOtaScreen();       break;
             case STATE_WIFI:      drawWifiScreen();      break;
             default: break;
         }

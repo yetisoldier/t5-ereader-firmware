@@ -12,6 +12,7 @@ void display_draw_hline(int x, int y, int w, uint8_t gray4);
 void display_draw_vline(int x, int y, int h, uint8_t gray4);
 void display_draw_rect(int x, int y, int w, int h, uint8_t gray4);
 void display_update();               // full refresh (heavy clear + draw, ~3s, 6 cycles)
+void display_update_sleep();         // full refresh for sleep image; preserves panel hold state
 void display_update_medium();        // medium refresh for chapter jumps (~1s, 2 cycles)
 void display_update_fast();          // lighter full-screen refresh for page turns (1 cycle)
 void display_update_reader_body(int x, int y, int w, int h, bool strongCleanup = false);

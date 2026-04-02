@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.2.1 — 2026-04-02
+
+### Added
+- OTA update path in Settings with GitHub Releases version check, download progress, install flow, and reboot on success
+- Dual OTA app partitions plus a GitHub Actions release workflow that builds `firmware.bin` from release tags
+- Built-in cold-boot splash screen and wake feedback banner before the restored UI redraws
+- Automatic SD folder bootstrap for `/books`, `/books/.progress`, `/books/.linecache`, and `/sleep`
+
+### Changed
+- Top physical button behavior is now unified on GPIO 21: long press sleeps, short press moves forward, and double press moves back
+- Sleep image handling now scans `/sleep`, supports `.png`, `.jpg`, and `.jpeg`, rotates images, retries the next image after a bad file, and falls back cleanly to the built-in sleep screen
+- Sleep image rendering now handles larger source images more reliably by allocating PNG line buffers to the actual image width and rejecting oversized files instead of failing unpredictably
+- Reader wake/resume now restores state more cleanly, including immediate redraw after wake and safer fallback to the library if a saved book cannot reopen
+- Display refresh behavior was tuned to reduce ghosting and improve transitions for library, settings, TOC, bookmarks, wake, and sleep-image rendering
+- Settings flow now includes the firmware version on screen and a firmware update entry
+- Storage and boot serial logs are more explicit about SD mount status and folder readiness
+- WiFi upload guidance and docs now match the current `/books` and `/sleep` layout
+
+### Fixed
+- Corrected the configured sleep-image folder from `/sleep_images` to `/sleep`
+- Fixed sleep-image grayscale conversion so rendered custom images display with the intended polarity
+- Fixed release-version consistency by allowing tagged release builds to inject `FIRMWARE_VERSION` from the release tag while keeping the local default in `config.h.example`
+
 ## v0.1.0 — 2026-04-01
 
 Initial public release.

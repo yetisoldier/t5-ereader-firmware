@@ -11,8 +11,6 @@
 static Preferences _prefs;
 
 static const int MAX_WRAP_TEXT_CHARS = 120000;
-static const char* LINE_CACHE_DIR = "/books/.linecache";
-
 bool BookReader::openBook(const char* filepath) {
     closeBook();
     if (!_parser.open(filepath)) return false;

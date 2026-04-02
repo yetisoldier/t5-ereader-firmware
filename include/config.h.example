@@ -1,7 +1,9 @@
 #pragma once
 
 // ─── Firmware Version ──────────────────────────────────────────────
-#define FIRMWARE_VERSION "0.2.0"
+#ifndef FIRMWARE_VERSION
+#define FIRMWARE_VERSION "0.2.1"
+#endif
 
 // ─── WiFi Credentials ───────────────────────────────────────────────
 // Copy this file to config.h and fill in your WiFi details.
@@ -50,8 +52,11 @@
 #define RTC_SDA  18
 #define RTC_SCL  17
 
-// ─── Button (wake from deep sleep) ──────────────────────────────────
+// ─── Buttons ────────────────────────────────────────────────────────
+// Top button on the T5 hardware: sleep / wake
 #define BUTTON_PIN 21
+// Middle button on the T5 hardware (BOOT / IO0): page turns
+#define PAGE_BUTTON_PIN 0
 
 // ─── epdiy I2C bus (PCA9555 power control — library internal) ───────
 #define EPD_I2C_SDA 39
@@ -83,5 +88,6 @@
 // ─── Book Storage ───────────────────────────────────────────────────
 #define BOOKS_DIR      "/books"
 #define PROGRESS_DIR   "/books/.progress"
-#define SLEEP_IMAGES_DIR "/sleep_images"
+#define LINE_CACHE_DIR "/books/.linecache"
+#define SLEEP_IMAGES_DIR "/sleep"
 #define MAX_BOOKS      100

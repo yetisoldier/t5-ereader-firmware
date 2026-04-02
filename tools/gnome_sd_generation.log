@@ -1,0 +1,28 @@
+[INFO ] stable-diffusion.cpp:259  - loading model from '../models/sd15.safetensors'
+[INFO ] model.cpp:333  - load ../models/sd15.safetensors using safetensors format
+[INFO ] stable-diffusion.cpp:352  - Version: SD 1.x 
+[INFO ] stable-diffusion.cpp:380  - Weight type stat:                      f32: 1131 
+[INFO ] stable-diffusion.cpp:381  - Conditioner weight type stat:          f32: 196  
+[INFO ] stable-diffusion.cpp:382  - Diffusion model weight type stat:      f32: 686  
+[INFO ] stable-diffusion.cpp:383  - VAE weight type stat:                  f32: 248  
+[INFO ] stable-diffusion.cpp:669  - using VAE for encoding / decoding
+  |>                                                 | 20/1131 - 258.70MB/s[K  |===========================>                      | 623/1131 - 3.10GB/s[K  |===============================>                  | 718/1131 - 3.33GB/s[K  |======================================>           | 876/1131 - 3.38GB/s[K  |===========================================>      | 979/1131 - 3.38GB/s[K  |==================================================| 1131/1131 - 3.81GB/s[K
+[INFO ] model.cpp:1568 - loading tensors completed, taking 1.09s (process: 0.00s, read: 0.37s, memcpy: 0.00s, convert: 0.42s, copy_to_backend: 0.00s)
+[INFO ] stable-diffusion.cpp:881  - total params memory size = 2719.24MB (VRAM 0.00MB, RAM 2719.24MB): text_encoders 469.44MB(RAM), diffusion_model 2155.33MB(RAM), vae 94.47MB(RAM), controlnet 0.00MB(VRAM), pmid 0.00MB(RAM)
+[INFO ] stable-diffusion.cpp:951  - running in eps-prediction mode
+[WARN ] stable-diffusion.cpp:2547 - align up 540x960 to 576x960 (multiple=64)
+[INFO ] stable-diffusion.cpp:3110 - generate_image 576x960
+[INFO ] denoiser.hpp:499  - get_sigmas with discrete scheduler
+[INFO ] stable-diffusion.cpp:2691 - sampling using Euler A method
+[INFO ] stable-diffusion.cpp:3040 - get_learned_condition completed, taking 0.21s
+[INFO ] stable-diffusion.cpp:3144 - generating image: 1/1 - seed 42
+  |==>                                               | 1/25 - 48.25s/it[K  |====>                                             | 2/25 - 48.32s/it[K  |======>                                           | 3/25 - 48.75s/it[K  |========>                                         | 4/25 - 48.95s/it[K  |==========>                                       | 5/25 - 49.10s/it[K  |============>                                     | 6/25 - 49.28s/it[K  |==============>                                   | 7/25 - 49.32s/it[K  |================>                                 | 8/25 - 49.33s/it[K  |==================>                               | 9/25 - 49.36s/it[K  |====================>                             | 10/25 - 49.42s/it[K  |======================>                           | 11/25 - 49.49s/it[K  |========================>                         | 12/25 - 49.54s/it[K  |==========================>                       | 13/25 - 49.54s/it[K  |============================>                     | 14/25 - 49.64s/it[K  |==============================>                   | 15/25 - 49.67s/it[K  |================================>                 | 16/25 - 49.69s/it[K  |==================================>               | 17/25 - 49.73s/it[K  |====================================>             | 18/25 - 49.73s/it[K  |======================================>           | 19/25 - 49.74s/it[K  |========================================>         | 20/25 - 49.72s/it[K  |==========================================>       | 21/25 - 49.76s/it[K  |============================================>     | 22/25 - 49.77s/it[K  |==============================================>   | 23/25 - 49.78s/it[K  |================================================> | 24/25 - 49.77s/it[K  |==================================================| 25/25 - 49.79s/it[K
+[INFO ] stable-diffusion.cpp:3175 - sampling completed, taking 1244.85s
+[INFO ] stable-diffusion.cpp:3193 - generating 1 latent images completed, taking 1244.93s
+[INFO ] stable-diffusion.cpp:3064 - decoding 1 latents
+[INFO ] stable-diffusion.cpp:3080 - latent 1 decoded, taking 53.74s
+[INFO ] stable-diffusion.cpp:3084 - decode_first_stage completed, taking 53.74s
+[INFO ] stable-diffusion.cpp:3205 - generate_image completed in 1299.02s
+[INFO ] main.cpp:418  - save result image 0 to '/home/yetisoldier/.openclaw/workspace/t5-ereader-firmware/tools/gnome_sd.png' (success)
+[INFO ] main.cpp:467  - 1/1 images saved
+GEN_SECONDS=1300.29

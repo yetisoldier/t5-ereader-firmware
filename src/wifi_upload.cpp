@@ -43,7 +43,7 @@ static const char UPLOAD_HTML[] PROGMEM = R"rawliteral(
 <body>
 <h1>E-Reader Upload</h1>
 <div class="upload-form">
-  <p>Upload EPUB files to <code>/books</code> and PNG/JPG sleep images to <code>/sleep_images</code>.</p>
+  <p>Upload EPUB files to <code>/books</code> and PNG/JPG sleep images to <code>/sleep</code>.</p>
   <form method="POST" action="/upload" enctype="multipart/form-data">
     <input type="file" name="file" accept=".epub,.png,.jpg,.jpeg"><br>
     <button type="submit">Upload</button>
