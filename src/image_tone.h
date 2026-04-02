@@ -10,8 +10,8 @@ static inline uint8_t image_lift_gray8(uint8_t gray8) {
     static uint8_t lut[256];
     if (!lutReady) {
         // Gamma < 1 brightens the image without washing out highlights.
-        // 0.86 is a conservative lift that still preserves contrast.
-        constexpr float kGamma = 0.86f;
+        // 0.84 nudges the panel a touch lighter while keeping contrast intact.
+        constexpr float kGamma = 0.84f;
         for (int i = 0; i < 256; ++i) {
             float n = (float)i / 255.0f;
             float lifted = powf(n, kGamma);

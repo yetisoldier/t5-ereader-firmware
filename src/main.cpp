@@ -214,7 +214,7 @@ static void wrapPosterTitle(const String& title, int maxWidth, int maxLines,
     }
 }
 
-static void drawPosterFallbackTile(const BookInfo& book, int x, int y, int w, int h) {
+static void drawPosterNoCoverTile(const BookInfo& book, int x, int y, int w, int h) {
     display_draw_filled_rect(x, y, w, h, 15);
     display_draw_rect(x, y, w, h, 8);
 
@@ -256,27 +256,21 @@ static void drawPosterFallbackTile(const BookInfo& book, int x, int y, int w, in
 static void drawDefaultPoster(BookInfo& book, int x, int y, int w, int h) {
     if (settings_get().posterShowCovers) {
         if (book.posterCoverFailed) {
-            drawPosterFallbackTile(book, x, y, w, h);
+            drawPosterNoCoverTile(book, x, y, w, h);
             return;
         }
 
-        if (!cover_can_render_poster(book)) {
-            if (book.hasCover && book.coverPath.length() > 0) {
-                book.posterCoverFailed = true;
-                Serial.printf("Poster fallback: %s uses non-poster mode (unsupported cover format: %s)\n",
-                              book.filepath.c_str(), book.coverPath.c_str());
-                drawPosterFallbackTile(book, x, y, w, h);
-                return;
-            }
-        } else if (cover_render_poster(book, x, y, w, h)) {
-            return;
-        } else {
-            book.posterCoverFailed = true;
-            Serial.printf("Poster fallback: %s will use non-poster mode (cover render failed)\n",
-                          book.filepath.c_str());
-            drawPosterFallbackTile(book, x, y, w, h);
+        if (cover_can_render_poster(book) && cover_render_poster(book, x, y, w, h)) {
             return;
         }
+
+        if (book.hasCover && book.coverPath.length() > 0) {
+            book.posterCoverFailed = true;
+            Serial.printf("Poster fallback: %s will use covers-off rendering (cover unavailable or failed: %s)\n",
+                          book.filepath.c_str(), book.coverPath.c_str());
+        }
+        drawPosterNoCoverTile(book, x, y, w, h);
+        return;
     }
 
     display_draw_filled_rect(x, y, w, h, 15);
