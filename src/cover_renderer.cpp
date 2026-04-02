@@ -159,136 +159,15 @@ static void invalidate_cache_entry(const String& key) {
     }
 }
 
-static uint64_t fnv1a64_init() {
-    return 1469598103934665603ULL;
-}
+static bool cover_asset_quality_ok(size_t assetSize, int decodedW, int decodedH) {
+    if (assetSize < 1500) return false;
+    if (decodedW < 100 || decodedH < 100) return false;
+    if (decodedW <= 0 || decodedH <= 0) return false;
 
-static uint64_t fnv1a64_update(uint64_t hash, const uint8_t* data, size_t len) {
-    if (!data) return hash;
-    for (size_t i = 0; i < len; ++i) {
-        hash ^= (uint64_t)data[i];
-        hash *= 1099511628211ULL;
-    }
-    return hash;
-}
+    float aspect = (float)decodedH / (float)decodedW;
+    if (aspect < 0.5f || aspect > 4.0f) return false;
 
-static uint64_t hash_u32(uint64_t hash, uint32_t value) {
-    uint8_t bytes[4] = {
-        (uint8_t)(value & 0xff),
-        (uint8_t)((value >> 8) & 0xff),
-        (uint8_t)((value >> 16) & 0xff),
-        (uint8_t)((value >> 24) & 0xff),
-    };
-    return fnv1a64_update(hash, bytes, sizeof(bytes));
-}
-
-static uint64_t hash_string_ci(uint64_t hash, const String& value) {
-    for (size_t i = 0; i < value.length(); ++i) {
-        char c = value[i];
-        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
-        hash ^= (uint8_t)c;
-        hash *= 1099511628211ULL;
-    }
-    return hash;
-}
-
-static uint64_t fingerprint_decoded_pixels(const uint8_t* pixels, int w, int h) {
-    if (!pixels || w <= 0 || h <= 0) return 0;
-    uint64_t hash = fnv1a64_init();
-    hash = hash_u32(hash, (uint32_t)w);
-    hash = hash_u32(hash, (uint32_t)h);
-    return fnv1a64_update(hash, pixels, (size_t)w * h);
-}
-
-static uint64_t fingerprint_asset_bytes(const uint8_t* data, size_t size) {
-    if (!data || size == 0) return 0;
-    uint64_t hash = fnv1a64_init();
-    uint64_t size64 = (uint64_t)size;
-    hash = hash_u32(hash, (uint32_t)(size64 & 0xffffffffULL));
-    hash = hash_u32(hash, (uint32_t)((size64 >> 32) & 0xffffffffULL));
-    return fnv1a64_update(hash, data, size);
-}
-
-static bool path_has_placeholder_token(const String& path) {
-    if (path.length() == 0) return false;
-
-    static const char* TOKENS[] = {
-        "placeholder",
-        "defaultcover",
-        "default_cover",
-        "default-cover",
-        "nocover",
-        "no_cover",
-        "no-cover",
-        "missingcover",
-        "missing_cover",
-        "missing-cover",
-        "covermissing",
-        "cover_missing",
-        "cover-missing",
-        "brokenimage",
-        "broken_image",
-        "broken-image",
-        "notfound",
-        "not_found",
-        "not-found",
-        "fallback",
-        "blankcover",
-        "blank_cover",
-        "blank-cover",
-        "emptycover",
-        "empty_cover",
-        "empty-cover",
-    };
-
-    String lower = path;
-    lower.toLowerCase();
-    for (const char* token : TOKENS) {
-        if (lower.indexOf(token) >= 0) return true;
-    }
-    return false;
-}
-
-struct PlaceholderMatchResult {
-    bool matched = false;
-    const char* reason = nullptr;
-    uint64_t assetFingerprint = 0;
-    uint64_t pixelFingerprint = 0;
-    uint64_t pathFingerprint = 0;
-};
-
-static PlaceholderMatchResult classify_placeholder_or_degenerate(const String& coverPath,
-                                                                const uint8_t* assetData,
-                                                                size_t assetSize,
-                                                                const uint8_t* pixels,
-                                                                int w,
-                                                                int h) {
-    PlaceholderMatchResult result;
-    if (!pixels || w <= 0 || h <= 0) return result;
-
-    result.assetFingerprint = fingerprint_asset_bytes(assetData, assetSize);
-    result.pixelFingerprint = fingerprint_decoded_pixels(pixels, w, h);
-    result.pathFingerprint = hash_string_ci(fnv1a64_init(), coverPath);
-
-    if (assetSize > 0 && assetSize < 1024) {
-        result.matched = true;
-        result.reason = "tiny-asset";
-        return result;
-    }
-
-    if (w < 40 || h < 40) {
-        result.matched = true;
-        result.reason = "tiny-decode";
-        return result;
-    }
-
-    if (path_has_placeholder_token(coverPath)) {
-        result.matched = true;
-        result.reason = "placeholder-path";
-        return result;
-    }
-
-    return result;
+    return true;
 }
 
 bool cover_render_poster(BookInfo& book, int x, int y, int w, int h) {
@@ -299,62 +178,64 @@ bool cover_render_poster(BookInfo& book, int x, int y, int w, int h) {
     int maxH = std::max(1, h - innerPad * 2);
     String cacheKey = make_cache_key(book, maxW, maxH);
     if (ThumbCacheEntry* cached = find_cache_entry(cacheKey)) {
-        PlaceholderMatchResult cachedMatch = classify_placeholder_or_degenerate(book.coverPath,
-                                                                                nullptr,
-                                                                                0,
-                                                                                cached->pixels,
-                                                                                cached->w,
-                                                                                cached->h);
-        if (cachedMatch.matched) {
-            Serial.printf("Poster cache invalidated: %s cached poster matched %s (path=%016llx pixels=%016llx)\n",
-                          book.filepath.c_str(),
-                          cachedMatch.reason ? cachedMatch.reason : "placeholder",
-                          (unsigned long long)cachedMatch.pathFingerprint,
-                          (unsigned long long)cachedMatch.pixelFingerprint);
-            invalidate_cache_entry(cacheKey);
-        } else {
-            display_draw_filled_rect(x, y, w, h, 15);
-            display_draw_rect(x, y, w, h, 8);
-            int dstX = x + (w - cached->w) / 2;
-            int dstY = y + (h - cached->h) / 2;
-            draw_thumb_pixels(dstX, dstY, cached->w, cached->h, cached->pixels);
-            display_draw_rect(x + 6, y + 6, w - 12, h - 12, 12);
-            return true;
-        }
+        display_draw_filled_rect(x, y, w, h, 15);
+        display_draw_rect(x, y, w, h, 8);
+        int dstX = x + (w - cached->w) / 2;
+        int dstY = y + (h - cached->h) / 2;
+        draw_thumb_pixels(dstX, dstY, cached->w, cached->h, cached->pixels);
+        display_draw_rect(x + 6, y + 6, w - 12, h - 12, 12);
+        return true;
     }
 
+    auto failPoster = [&](const char* reason) -> bool {
+        Serial.printf("Poster fallback: %s cover rejected (%s) cover=%s\n",
+                      book.filepath.c_str(),
+                      reason ? reason : "unknown",
+                      book.coverPath.c_str());
+        invalidate_cache_entry(cacheKey);
+        book.posterCoverFailed = true;
+        return false;
+    };
+
     EpubParser parser;
-    if (!parser.open(book.filepath.c_str())) return false;
+    if (!parser.open(book.filepath.c_str())) return failPoster("epub-open-failed");
 
     size_t size = 0;
     uint8_t* data = parser.readAsset(book.coverPath, &size);
     parser.close();
     if (!data || size == 0) {
         if (data) free(data);
-        return false;
+        return failPoster("asset-read-failed");
+    }
+
+    if (size < 1500) {
+        free(data);
+        return failPoster("asset-too-small");
     }
 
     bool isJpeg = ends_with_ci(book.coverPath, ".jpg") || ends_with_ci(book.coverPath, ".jpeg");
     bool isPng = ends_with_ci(book.coverPath, ".png");
     if (!isJpeg && !isPng) {
         free(data);
-        return false;
+        return failPoster("unsupported-cover-format");
     }
 
     ThumbContext ctx;
     ctx.pixels = (uint8_t*)ps_malloc((size_t)maxW * maxH);
     if (!ctx.pixels) {
         free(data);
-        return false;
+        return failPoster("thumb-alloc-failed");
     }
     memset(ctx.pixels, 255, (size_t)maxW * maxH);
 
+    bool decoderOpened = false;
     bool ok = false;
     if (isJpeg) {
-        if (g_jpeg.openRAM(data, (int)size, jpegDrawCallback)) {
+        decoderOpened = g_jpeg.openRAM(data, (int)size, jpegDrawCallback);
+        if (decoderOpened) {
             ctx.srcW = g_jpeg.getWidth();
             ctx.srcH = g_jpeg.getHeight();
-            if (ctx.srcW > 0 && ctx.srcH > 0) {
+            if (cover_asset_quality_ok(size, ctx.srcW, ctx.srcH)) {
                 int drawW = maxW;
                 int drawH = (ctx.srcH * drawW) / ctx.srcW;
                 if (drawH > maxH) {
@@ -372,10 +253,11 @@ bool cover_render_poster(BookInfo& book, int x, int y, int w, int h) {
             g_jpeg.close();
         }
     } else if (isPng) {
-        if (g_png.openRAM(data, (int)size, pngDrawCallback) == PNG_SUCCESS) {
+        decoderOpened = g_png.openRAM(data, (int)size, pngDrawCallback) == PNG_SUCCESS;
+        if (decoderOpened) {
             ctx.srcW = g_png.getWidth();
             ctx.srcH = g_png.getHeight();
-            if (ctx.srcW > 0 && ctx.srcH > 0) {
+            if (cover_asset_quality_ok(size, ctx.srcW, ctx.srcH)) {
                 int drawW = maxW;
                 int drawH = (ctx.srcH * drawW) / ctx.srcW;
                 if (drawH > maxH) {
@@ -394,24 +276,22 @@ bool cover_render_poster(BookInfo& book, int x, int y, int w, int h) {
         }
     }
 
-    if (ok) {
-        PlaceholderMatchResult match = classify_placeholder_or_degenerate(book.coverPath,
-                                                                          data,
-                                                                          size,
-                                                                          ctx.pixels,
-                                                                          ctx.dstW,
-                                                                          ctx.dstH);
-        if (match.matched) {
-            Serial.printf("Poster fallback: %s cover asset rejected (%s) path=%016llx asset=%016llx pixels=%016llx cover=%s\n",
-                          book.filepath.c_str(),
-                          match.reason ? match.reason : "placeholder",
-                          (unsigned long long)match.pathFingerprint,
-                          (unsigned long long)match.assetFingerprint,
-                          (unsigned long long)match.pixelFingerprint,
-                          book.coverPath.c_str());
-            invalidate_cache_entry(cacheKey);
-            ok = false;
-        }
+    if (!decoderOpened) {
+        free(ctx.pixels);
+        free(data);
+        return failPoster("decode-open-failed");
+    }
+
+    if (!cover_asset_quality_ok(size, ctx.srcW, ctx.srcH)) {
+        free(ctx.pixels);
+        free(data);
+        return failPoster("failed-quality-guards");
+    }
+
+    if (!ok || !ctx.pixels || ctx.dstW <= 0 || ctx.dstH <= 0) {
+        free(ctx.pixels);
+        free(data);
+        return failPoster("decode-failed");
     }
 
     if (ok) {
