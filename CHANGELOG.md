@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.3.0 — 2026-04-02
+
+### Added
+- New gnome boot splash artwork (540×540, replaces previous placeholder)
+- Updated screenshot gallery in README with current device photos (library, reader, settings, sleep, wake)
+
+### Changed
+- Boot splash bitmap polarity corrected — black/white pixels now render accurately on the e-ink panel
+- Splash art dimensions updated to 540×540; version and status text rendered dynamically below the artwork
+
+### Fixed
+- Grayscale inversion corrected for cover art and inline EPUB images
+- Poster placeholder detection improved with multi-layer statistical heuristic and fingerprint-based check
+- Universal cover quality guards added (size, dimensions, aspect ratio, decode failure)
+- Brightened image rendering pipeline for cleaner display output
+- Removed stale broken screenshot reference from README
+
+---
+
 ## v0.2.1 — 2026-04-02
 
 ### Added
