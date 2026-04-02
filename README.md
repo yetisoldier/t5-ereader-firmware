@@ -119,7 +119,7 @@ More specifically:
 
 ## Screenshots
 
-The screenshots below are now copied into `docs/screenshots/` so they render inline on GitHub.
+The current screenshots are copied into `docs/screenshots/` so they render inline on GitHub.
 
 ### Start Up Screen
 ![Start Up Screen](docs/screenshots/startup-screen.png)
@@ -127,16 +127,12 @@ The screenshots below are now copied into `docs/screenshots/` so they render inl
 ### Library Screen
 ![Library Screen](docs/screenshots/library-screen.jpg)
 
-### Settings Screen
-- No confident e-reader settings screenshot was available in the current media set.
-- The previously copied `docs/screenshots/settings-screen.jpg` was a board photo, not a settings page, so it has been removed from the gallery.
-- Please provide the original settings screenshot if you want this section restored.
-
 ### Reading Screen
 ![Reading Screen](docs/screenshots/reading-screen.jpg)
 
-### Custom Sleep Screen Image
-![Custom Sleep Screen Image](docs/screenshots/custom-sleep-screen.png)
+### Settings Screen
+- No confident e-reader settings screenshot is available in the current media set yet.
+- If you have the original settings capture, drop it into `docs/screenshots/` and add it here.
 
 ### Sleep Wake Up Screen
 - Screenshot not found in the available media storage yet.
