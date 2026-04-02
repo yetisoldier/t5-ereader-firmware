@@ -20,6 +20,9 @@ jobs:
       - name: Install PlatformIO
         run: pip install platformio
 
+      - name: Prepare config header for CI build
+        run: cp include/config.h.example include/config.h
+
       - name: Build firmware
         env:
           RELEASE_TAG: ${{ github.ref_name }}
