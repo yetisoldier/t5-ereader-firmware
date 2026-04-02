@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <algorithm>
+#include <cmath>
 #include <stdint.h>
 #include <vector>
 #include "epub.h"
@@ -148,67 +149,62 @@ static void store_cache_entry(const String& key, const ThumbContext& ctx) {
     g_thumbCache.push_back(entry);
 }
 
-// Generic broken-image placeholders usually have a bright field with a small,
-// centrally clustered dark icon. Treat that as a failed cover render so the
-// book falls back to the exact covers-off layout instead of showing the tile.
-static bool looks_like_generic_placeholder(const uint8_t* pixels, int w, int h) {
+static void invalidate_cache_entry(const String& key) {
+    for (auto it = g_thumbCache.begin(); it != g_thumbCache.end(); ++it) {
+        if (it->key == key) {
+            free(it->pixels);
+            g_thumbCache.erase(it);
+            return;
+        }
+    }
+}
+
+static bool looks_like_placeholder_or_degenerate(const uint8_t* pixels, int w, int h, size_t fileSize) {
     if (!pixels || w <= 0 || h <= 0) return false;
 
-    const int total = w * h;
-    if (total < 1024) return false;
+    if (fileSize > 0 && fileSize < 1024) return true;
+    if (w < 40 || h < 40) return true;
 
-    const int centerX0 = w / 4;
-    const int centerX1 = w - centerX0;
-    const int centerY0 = h / 4;
-    const int centerY1 = h - centerY0;
+    const size_t total = (size_t)w * h;
+    size_t sampleCount = 0;
+    double sum = 0.0;
+    double sumSq = 0.0;
+    size_t veryBright = 0;
+    size_t veryDark = 0;
+    size_t midtone = 0;
 
-    int brightCount = 0;
-    int darkCount = 0;
-    int centerDarkCount = 0;
-    int minX = w, minY = h, maxX = -1, maxY = -1;
+    for (size_t i = 0; i < total; i += 4) {
+        const double gray = pixels[i];
+        sum += gray;
+        sumSq += gray * gray;
+        ++sampleCount;
 
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            uint8_t gray = pixels[y * w + x];
-            if (gray >= 240) ++brightCount;
-            if (gray <= 112) {
-                ++darkCount;
-                if (x >= centerX0 && x < centerX1 && y >= centerY0 && y < centerY1) {
-                    ++centerDarkCount;
-                }
-                if (x < minX) minX = x;
-                if (y < minY) minY = y;
-                if (x > maxX) maxX = x;
-                if (y > maxY) maxY = y;
-            }
+        if (gray >= 235.0) {
+            ++veryBright;
+        } else if (gray <= 100.0) {
+            ++veryDark;
+        } else {
+            ++midtone;
         }
     }
 
-    // Too little or too much dark content, or not mostly bright, is not the
-    // generic placeholder pattern we are trying to catch.
-    if (darkCount < total / 80) return false;
-    if (darkCount > total / 5) return false;
-    if (brightCount < total / 2) return false;
+    if (sampleCount == 0) return false;
 
-    // The dark content should be centrally clustered. Real cover art tends to
-    // have more distributed structure, even when it is light overall.
-    if (centerDarkCount * 100 < darkCount * 70) return false;
+    const double mean = sum / sampleCount;
+    const double variance = std::max(0.0, (sumSq / sampleCount) - (mean * mean));
+    const float stddev = sqrtf((float)variance);
+    Serial.printf("  placeholder check: mean=%.1f stddev=%.1f\n", mean, stddev);
 
-    if (minX > maxX || minY > maxY) return false;
-    const int bboxW = maxX - minX + 1;
-    const int bboxH = maxY - minY + 1;
-    const int bboxArea = bboxW * bboxH;
-    if (bboxArea > total / 4) return false;
+    if (stddev < 8.0f) return true;
 
-    const int bboxCx = minX + bboxW / 2;
-    const int bboxCy = minY + bboxH / 2;
-    int dx = bboxCx - (w / 2);
-    if (dx < 0) dx = -dx;
-    int dy = bboxCy - (h / 2);
-    if (dy < 0) dy = -dy;
-    if (dx > w / 6 || dy > h / 6) return false;
+    const float brightRatio = (float)veryBright / sampleCount;
+    const float darkRatio = (float)veryDark / sampleCount;
+    const float midtoneRatio = (float)midtone / sampleCount;
 
-    return true;
+    if (brightRatio > 0.85f && darkRatio < 0.15f && stddev < 25.0f) return true;
+    if (midtoneRatio < 0.05f && stddev < 35.0f) return true;
+
+    return false;
 }
 
 bool cover_render_poster(BookInfo& book, int x, int y, int w, int h) {
@@ -219,13 +215,19 @@ bool cover_render_poster(BookInfo& book, int x, int y, int w, int h) {
     int maxH = std::max(1, h - innerPad * 2);
     String cacheKey = make_cache_key(book, maxW, maxH);
     if (ThumbCacheEntry* cached = find_cache_entry(cacheKey)) {
-        display_draw_filled_rect(x, y, w, h, 15);
-        display_draw_rect(x, y, w, h, 8);
-        int dstX = x + (w - cached->w) / 2;
-        int dstY = y + (h - cached->h) / 2;
-        draw_thumb_pixels(dstX, dstY, cached->w, cached->h, cached->pixels);
-        display_draw_rect(x + 6, y + 6, w - 12, h - 12, 12);
-        return true;
+        if (looks_like_placeholder_or_degenerate(cached->pixels, cached->w, cached->h, 0)) {
+            Serial.printf("Poster cache invalidated: %s cached poster now looks like a placeholder\n",
+                          book.filepath.c_str());
+            invalidate_cache_entry(cacheKey);
+        } else {
+            display_draw_filled_rect(x, y, w, h, 15);
+            display_draw_rect(x, y, w, h, 8);
+            int dstX = x + (w - cached->w) / 2;
+            int dstY = y + (h - cached->h) / 2;
+            draw_thumb_pixels(dstX, dstY, cached->w, cached->h, cached->pixels);
+            display_draw_rect(x + 6, y + 6, w - 12, h - 12, 12);
+            return true;
+        }
     }
 
     EpubParser parser;
@@ -299,8 +301,8 @@ bool cover_render_poster(BookInfo& book, int x, int y, int w, int h) {
         }
     }
 
-    if (ok && looks_like_generic_placeholder(ctx.pixels, ctx.dstW, ctx.dstH)) {
-        Serial.printf("Poster fallback: %s cover image looks like a generic placeholder, using covers-off rendering\n",
+    if (ok && looks_like_placeholder_or_degenerate(ctx.pixels, ctx.dstW, ctx.dstH, size)) {
+        Serial.printf("Poster fallback: %s cover image looks like a placeholder or degenerate poster, using covers-off rendering\n",
                       book.filepath.c_str());
         ok = false;
     }
