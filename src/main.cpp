@@ -152,7 +152,6 @@ static void drawBottomBarSplit(const char* left, const char* right) {
 }
 
 static void drawGnomeSplash(const char* statusMsg = "Starting up...") {
-    display_set_font_size(1);
     display_fill_screen(15);
 
     for (int y = 0; y < SPLASH_ART_HEIGHT; ++y) {
@@ -170,8 +169,6 @@ static void drawGnomeSplash(const char* statusMsg = "Starting up...") {
     const int footerBottom = H - 1;
     const int separatorY1 = footerTop + 4;
     const int separatorY2 = footerTop + 9;
-    const int statusY = SPLASH_ART_HEIGHT + 45;
-    const int versionY = SPLASH_ART_HEIGHT + 95;
     const int borderTop = separatorY2 + 1;
     const int borderHeight = footerBottom - borderTop - 7;
     const int bottomY1 = H - 8;
@@ -187,17 +184,28 @@ static void drawGnomeSplash(const char* statusMsg = "Starting up...") {
 
     display_draw_hline(frameLeft[0], separatorY1, frameWidth, 0);
     display_draw_hline(frameLeft[0], separatorY2, frameWidth, 0);
+    display_draw_hline(frameLeft[0], bottomY1, frameWidth, 0);
+    display_draw_hline(frameLeft[0], bottomY2, frameWidth, 0);
+
+    // Text coordinates are baseline-based. The old version baseline was set to
+    // SPLASH_ART_HEIGHT + 95, which put it at y=955 with an 860px crop — only
+    // a few pixels above the bottom edge, so the glyphs were effectively drawn
+    // off-screen. Use a footer-specific layout and the small UI font so both
+    // lines fit cleanly in the reserved splash footer.
+    display_set_font_size(0);
+    const int splashFontH = display_font_height();
+    const int versionY = bottomY1 - 10;
+    const int statusY = max(separatorY2 + splashFontH + 10, versionY - splashFontH - 10);
 
     int statusW = display_text_width(statusMsg);
     display_draw_text((SPLASH_WIDTH - statusW) / 2, statusY, statusMsg, 4);
 
     char verStr[32];
-    snprintf(verStr, sizeof(verStr), "%s", FIRMWARE_VERSION);
+    snprintf(verStr, sizeof(verStr), "v%s", FIRMWARE_VERSION);
     int vw = display_text_width(verStr);
     display_draw_text((SPLASH_WIDTH - vw) / 2, versionY, verStr, 8);
 
-    display_draw_hline(frameLeft[0], bottomY1, frameWidth, 0);
-    display_draw_hline(frameLeft[0], bottomY2, frameWidth, 0);
+    display_set_font_size(1);
 }
 
 // ═══════════════════════════════════════════════════════════════════
