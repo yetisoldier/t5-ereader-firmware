@@ -117,9 +117,32 @@ More specifically:
 - Library
 - Tap outside the menu items to resume reading
 
-#### Book Settings Page
-- Screenshot placeholder: the newly provided "Book Settings Page" capture should be embedded here once the asset is added to the repo.
-- No image file was available in this workspace, so the docs keep a clear reference point here instead of inventing a path.
+## Screenshots
+
+The screenshots below are now copied into `docs/screenshots/` so they render inline on GitHub.
+
+### Start Up Screen
+![Start Up Screen](docs/screenshots/startup-screen.png)
+
+### Library Screen
+![Library Screen](docs/screenshots/library-screen.jpg)
+
+### Settings Screen
+![Settings Screen](docs/screenshots/settings-screen.jpg)
+
+### Reading Screen
+![Reading Screen](docs/screenshots/reading-screen.jpg)
+
+### Custom Sleep Screen Image
+![Custom Sleep Screen Image](docs/screenshots/custom-sleep-screen.png)
+
+### Sleep Wake Up Screen
+- Screenshot not found in the available media storage yet.
+- Placeholder preserved so the section is ready once the asset turns up.
+
+### Book Settings Page
+- Screenshot not found in the available media storage yet.
+- Placeholder preserved so the section is ready once the asset turns up.
 
 ## Sleep image workflow
 
