@@ -103,18 +103,23 @@ More specifically:
 - Tap Continue Reading to reopen the most recent book with progress
 
 #### Reader
+- Swipe left: next page
+- Swipe right: previous page
 - Tap left third: previous page
 - Tap right third: next page
-- Tap center: reader menu
-- Long-press center: add bookmark for current page
-- Swipe left/right: next/previous page
+- Tap center third: open the in-book menu/settings overlay
+- Long-press center third: add a bookmark for the current page
 
 #### Reader menu
 - Table of Contents
 - Bookmarks
 - Settings
 - Library
-- Tap outside the menu to resume reading
+- Tap outside the menu items to resume reading
+
+#### Book Settings Page
+- Screenshot placeholder: the newly provided "Book Settings Page" capture should be embedded here once the asset is added to the repo.
+- No image file was available in this workspace, so the docs keep a clear reference point here instead of inventing a path.
 
 ## Sleep image workflow
 
