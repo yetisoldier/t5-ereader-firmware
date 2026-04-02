@@ -14,7 +14,7 @@ from PIL import Image
 W, H = 540, 960
 # Crop just above the old footer separator band so the firmware keeps a large,
 # clean dynamic text region below the static bitmap.
-ART_HEIGHT = 528
+ART_HEIGHT = 536
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 SOURCE_IMAGE = Path(os.environ.get("GNOME_SPLASH_SOURCE", SCRIPT_DIR / "gnome_final_preview.png"))
