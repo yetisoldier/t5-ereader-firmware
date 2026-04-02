@@ -148,6 +148,69 @@ static void store_cache_entry(const String& key, const ThumbContext& ctx) {
     g_thumbCache.push_back(entry);
 }
 
+// Generic broken-image placeholders usually have a bright field with a small,
+// centrally clustered dark icon. Treat that as a failed cover render so the
+// book falls back to the exact covers-off layout instead of showing the tile.
+static bool looks_like_generic_placeholder(const uint8_t* pixels, int w, int h) {
+    if (!pixels || w <= 0 || h <= 0) return false;
+
+    const int total = w * h;
+    if (total < 1024) return false;
+
+    const int centerX0 = w / 4;
+    const int centerX1 = w - centerX0;
+    const int centerY0 = h / 4;
+    const int centerY1 = h - centerY0;
+
+    int brightCount = 0;
+    int darkCount = 0;
+    int centerDarkCount = 0;
+    int minX = w, minY = h, maxX = -1, maxY = -1;
+
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            uint8_t gray = pixels[y * w + x];
+            if (gray >= 240) ++brightCount;
+            if (gray <= 112) {
+                ++darkCount;
+                if (x >= centerX0 && x < centerX1 && y >= centerY0 && y < centerY1) {
+                    ++centerDarkCount;
+                }
+                if (x < minX) minX = x;
+                if (y < minY) minY = y;
+                if (x > maxX) maxX = x;
+                if (y > maxY) maxY = y;
+            }
+        }
+    }
+
+    // Too little or too much dark content, or not mostly bright, is not the
+    // generic placeholder pattern we are trying to catch.
+    if (darkCount < total / 80) return false;
+    if (darkCount > total / 5) return false;
+    if (brightCount < total / 2) return false;
+
+    // The dark content should be centrally clustered. Real cover art tends to
+    // have more distributed structure, even when it is light overall.
+    if (centerDarkCount * 100 < darkCount * 70) return false;
+
+    if (minX > maxX || minY > maxY) return false;
+    const int bboxW = maxX - minX + 1;
+    const int bboxH = maxY - minY + 1;
+    const int bboxArea = bboxW * bboxH;
+    if (bboxArea > total / 4) return false;
+
+    const int bboxCx = minX + bboxW / 2;
+    const int bboxCy = minY + bboxH / 2;
+    int dx = bboxCx - (w / 2);
+    if (dx < 0) dx = -dx;
+    int dy = bboxCy - (h / 2);
+    if (dy < 0) dy = -dy;
+    if (dx > w / 6 || dy > h / 6) return false;
+
+    return true;
+}
+
 bool cover_render_poster(BookInfo& book, int x, int y, int w, int h) {
     if (!cover_can_render_poster(book)) return false;
 
@@ -234,6 +297,12 @@ bool cover_render_poster(BookInfo& book, int x, int y, int w, int h) {
             }
             g_png.close();
         }
+    }
+
+    if (ok && looks_like_generic_placeholder(ctx.pixels, ctx.dstW, ctx.dstH)) {
+        Serial.printf("Poster fallback: %s cover image looks like a generic placeholder, using covers-off rendering\n",
+                      book.filepath.c_str());
+        ok = false;
     }
 
     if (ok) {
