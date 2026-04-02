@@ -12,10 +12,9 @@ import os
 from PIL import Image
 
 W, H = 540, 960
-# The baked footer text in the source image does not begin until roughly y=941,
-# but we intentionally keep a dedicated footer region below the static art for
-# runtime-rendered status + version text on the device.
-ART_HEIGHT = 870
+# Crop just above the old footer separator band so the firmware keeps a large,
+# clean dynamic text region below the static bitmap.
+ART_HEIGHT = 528
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 SOURCE_IMAGE = Path(os.environ.get("GNOME_SPLASH_SOURCE", SCRIPT_DIR / "gnome_final_preview.png"))
