@@ -6,7 +6,8 @@ Style: classic garden gnome - tall red pointed hat, white beard, rosy cheeks,
 Output: 540x960 1-bit BMP + C header for e-ink display.
 """
 from PIL import Image, ImageDraw, ImageFont
-import math, os
+import math, os, re
+from pathlib import Path
 
 W, H = 540, 960
 img = Image.new("1", (W, H), 1)   # 1=white background
@@ -41,6 +42,27 @@ def centered_text(text, y, font, fill=BLACK):
     bb = draw.textbbox((0, 0), text, font=font)
     w = bb[2] - bb[0]
     draw.text((CX - w // 2, y), text, font=font, fill=fill)
+
+
+def read_firmware_version():
+    release_tag = os.environ.get("RELEASE_TAG", "").strip()
+    if release_tag:
+        return release_tag if release_tag.startswith("v") else f"v{release_tag}"
+
+    repo_root = Path(__file__).resolve().parents[1]
+    for candidate in (repo_root / "include" / "config.h", repo_root / "include" / "config.h.example"):
+        try:
+            text = candidate.read_text()
+        except OSError:
+            continue
+        match = re.search(r'#define\s+FIRMWARE_VERSION\s+"([^"]+)"', text)
+        if match:
+            version = match.group(1).strip()
+            return version if version.startswith("v") else f"v{version}"
+    return "v0.2.1"
+
+
+VERSION_TEXT = read_firmware_version()
 
 # ─── Outer border ───────────────────────────────────────────────────
 draw.rectangle([4, 4, W-5, H-5], outline=BLACK, width=3)
@@ -293,7 +315,7 @@ draw.line([(30, H - 98), (W-30, H - 98)], fill=BLACK, width=1)
 draw.line([(30, H - 93), (W-30, H - 93)], fill=BLACK, width=3)
 
 centered_text("Starting up...", H - 82, font_sub)
-centered_text("v0.2.0", H - 54, font_ver)
+centered_text(VERSION_TEXT, H - 54, font_ver)
 
 # ─── Output ───────────────────────────────────────────────────────────
 out_dir = os.path.dirname(os.path.abspath(__file__))
