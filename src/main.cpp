@@ -151,10 +151,11 @@ static void drawBottomBarSplit(const char* left, const char* right) {
     display_draw_text(W * 3 / 4 - rw / 2, barY + FOOTER_HEIGHT - 12, right, 3);
 }
 
-static void drawGnomeSplash() {
+static void drawGnomeSplash(const char* statusMsg = "Starting up...") {
+    display_set_font_size(1);
     display_fill_screen(15);
 
-    for (int y = 0; y < SPLASH_HEIGHT; ++y) {
+    for (int y = 0; y < SPLASH_ART_HEIGHT; ++y) {
         int rowOffset = y * ((SPLASH_WIDTH + 7) / 8);
         for (int x = 0; x < SPLASH_WIDTH; ++x) {
             uint8_t byte = pgm_read_byte(&GNOME_SPLASH_BITMAP[rowOffset + (x / 8)]);
@@ -162,6 +163,41 @@ static void drawGnomeSplash() {
             display_draw_pixel(x, y, black ? 0 : 15);
         }
     }
+
+    const int frameLeft[] = {6, 7, 8};
+    const int frameRight[] = {531, 532, 533};
+    const int footerTop = SPLASH_ART_HEIGHT;
+    const int footerBottom = H - 1;
+    const int separatorY1 = footerTop + 4;
+    const int separatorY2 = footerTop + 9;
+    const int statusY = SPLASH_ART_HEIGHT + 45;
+    const int versionY = SPLASH_ART_HEIGHT + 95;
+    const int borderTop = separatorY2 + 1;
+    const int borderHeight = footerBottom - borderTop - 7;
+    const int bottomY1 = H - 8;
+    const int bottomY2 = H - 3;
+    const int frameWidth = frameRight[2] - frameLeft[0] + 1;
+
+    for (int x : frameLeft) {
+        display_draw_vline(x, borderTop, borderHeight, 0);
+    }
+    for (int x : frameRight) {
+        display_draw_vline(x, borderTop, borderHeight, 0);
+    }
+
+    display_draw_hline(frameLeft[0], separatorY1, frameWidth, 0);
+    display_draw_hline(frameLeft[0], separatorY2, frameWidth, 0);
+
+    int statusW = display_text_width(statusMsg);
+    display_draw_text((SPLASH_WIDTH - statusW) / 2, statusY, statusMsg, 4);
+
+    char verStr[32];
+    snprintf(verStr, sizeof(verStr), "%s", FIRMWARE_VERSION);
+    int vw = display_text_width(verStr);
+    display_draw_text((SPLASH_WIDTH - vw) / 2, versionY, verStr, 8);
+
+    display_draw_hline(frameLeft[0], bottomY1, frameWidth, 0);
+    display_draw_hline(frameLeft[0], bottomY2, frameWidth, 0);
 }
 
 // ═══════════════════════════════════════════════════════════════════
