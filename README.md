@@ -122,21 +122,24 @@ More specifically:
 The current screenshots are copied into `docs/screenshots/` so they render inline on GitHub.
 
 ### Start Up Screen
-![Start Up Screen](docs/screenshots/startup-screen.png)
+![Start Up Screen](docs/screenshots/Start%20Screen.jpeg)
 
 ### Library Screen
-![Library Screen](docs/screenshots/library-screen.jpg)
+![Library Screen 1](docs/screenshots/Library%20Screen%201.jpeg)
+
+![Library Screen 2](docs/screenshots/Library%20Screen%202.jpeg)
 
 ### Reading Screen
-![Reading Screen](docs/screenshots/reading-screen.jpg)
+![Reading Screen](docs/screenshots/Book.jpeg)
 
 ### Settings Screen
-- No confident e-reader settings screenshot is available in the current media set yet.
-- If you have the original settings capture, drop it into `docs/screenshots/` and add it here.
+![Book Settings](docs/screenshots/Book%20Settings.jpeg)
+
+### Sleep Screen
+![Sleep Screen](docs/screenshots/Sleep%20Screen.jpeg)
 
 ### Sleep Wake Up Screen
-- Screenshot not found in the available media storage yet.
-- Placeholder preserved so the section is ready once the asset turns up.
+![Sleep Wake Screen](docs/screenshots/Sleep%20Wake%20Screen.jpeg)
 
 ### Book Settings Page
 - Screenshot not found in the available media storage yet.
