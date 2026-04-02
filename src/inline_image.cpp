@@ -25,7 +25,7 @@ static inline uint8_t rgb565_gray4(uint16_t px) {
     uint8_t g = ((px >> 5)  & 0x3F) << 2;
     uint8_t b = (px & 0x1F) << 3;
     uint8_t gray8 = (uint8_t)((r * 38 + g * 75 + b * 15) >> 7);
-    return 15 - (gray8 >> 4);
+    return gray8 >> 4;  // 0=black, 15=white — EPD convention
 }
 
 static void plot(int sx, int sy, uint8_t g4) {

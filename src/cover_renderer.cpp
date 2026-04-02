@@ -88,7 +88,7 @@ static void draw_thumb_pixels(int dstX, int dstY, int w, int h, const uint8_t* p
     for (int y = 0; y < h; y++) {
         for (int x = 0; x < w; x++) {
             uint8_t gray8 = pixels[y * w + x];
-            uint8_t gray4 = 15 - (gray8 >> 4);
+            uint8_t gray4 = gray8 >> 4;  // 0=black, 15=white — EPD convention
             display_draw_pixel(dstX + x, dstY + y, gray4);
         }
     }
