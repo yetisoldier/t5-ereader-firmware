@@ -14,6 +14,7 @@ struct BookInfo {
     size_t fileSize = 0;       // file size for cache validation
     bool hasCover = false;
     String coverPath;
+    bool posterCoverFailed = false; // runtime-only fallback when poster rendering is broken
 };
 
 bool library_init();

@@ -1,6 +1,7 @@
 #include "inline_image.h"
 #include "epub.h"
 #include "display.h"
+#include "image_tone.h"
 #include <JPEGDEC.h>
 #include <PNGdec.h>
 #include <algorithm>
@@ -20,14 +21,6 @@ static PNG* g_ipng_active = nullptr;  // set during decode for callback access
 
 // ─── Pixel helpers ─────────────────────────────────────────────────
 
-static inline uint8_t rgb565_gray4(uint16_t px) {
-    uint8_t r = ((px >> 11) & 0x1F) << 3;
-    uint8_t g = ((px >> 5)  & 0x3F) << 2;
-    uint8_t b = (px & 0x1F) << 3;
-    uint8_t gray8 = (uint8_t)((r * 38 + g * 75 + b * 15) >> 7);
-    return gray8 >> 4;  // 0=black, 15=white — EPD convention
-}
-
 static void plot(int sx, int sy, uint8_t g4) {
     if (!g_ictx || g_ictx->srcW <= 0 || g_ictx->srcH <= 0) return;
     int dx = g_ictx->dstX + (sx * g_ictx->dstW) / g_ictx->srcW;
@@ -43,7 +36,7 @@ static int ijpegDraw(JPEGDRAW* pDraw) {
     for (int yy = 0; yy < pDraw->iHeight; yy++) {
         for (int xx = 0; xx < pDraw->iWidth; xx++) {
             uint16_t px = pDraw->pPixels[yy * pDraw->iWidth + xx];
-            plot(pDraw->x + xx, pDraw->y + yy, rgb565_gray4(px));
+            plot(pDraw->x + xx, pDraw->y + yy, image_rgb565_to_gray4(px));
         }
     }
     return 1;
@@ -55,7 +48,7 @@ static int ipngDraw(PNGDRAW* pDraw) {
     if (!g_ictx || !pDraw || !g_ictx->pngLineBuf || !g_ipng_active) return 0;
     g_ipng_active->getLineAsRGB565(pDraw, g_ictx->pngLineBuf, PNG_RGB565_LITTLE_ENDIAN, 0xffffffff);
     for (int xx = 0; xx < pDraw->iWidth; xx++) {
-        plot(xx, pDraw->y, rgb565_gray4(g_ictx->pngLineBuf[xx]));
+        plot(xx, pDraw->y, image_rgb565_to_gray4(g_ictx->pngLineBuf[xx]));
     }
     return 1;
 }

@@ -6,6 +6,7 @@
 #include <vector>
 #include "epub.h"
 #include "display.h"
+#include "image_tone.h"
 #include <JPEGDEC.h>
 #include <PNGdec.h>
 
@@ -33,11 +34,11 @@ static PNG g_png;
 static std::vector<ThumbCacheEntry> g_thumbCache;
 static const size_t MAX_THUMB_CACHE = 6;
 
-static inline uint8_t rgb565_to_gray(uint16_t px) {
-    uint8_t r = ((px >> 11) & 0x1F) << 3;
-    uint8_t g = ((px >> 5) & 0x3F) << 2;
-    uint8_t b = (px & 0x1F) << 3;
-    return (uint8_t)((r * 38 + g * 75 + b * 15) >> 7);
+bool cover_can_render_poster(const BookInfo& book) {
+    if (!book.hasCover || book.coverPath.length() == 0) return false;
+    String lower = book.coverPath;
+    lower.toLowerCase();
+    return lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png");
 }
 
 static void blit_gray_to_thumb(ThumbContext* ctx, int sx, int sy, uint8_t gray) {
@@ -54,7 +55,7 @@ static int jpegDrawCallback(JPEGDRAW* pDraw) {
     for (int yy = 0; yy < pDraw->iHeight; yy++) {
         for (int xx = 0; xx < pDraw->iWidth; xx++) {
             uint16_t px = pDraw->pPixels[yy * pDraw->iWidth + xx];
-            blit_gray_to_thumb(g_thumbCtx, pDraw->x + xx, pDraw->y + yy, rgb565_to_gray(px));
+            blit_gray_to_thumb(g_thumbCtx, pDraw->x + xx, pDraw->y + yy, image_rgb565_to_gray8(px));
         }
     }
 
@@ -69,7 +70,7 @@ static int pngDrawCallback(PNGDRAW* pDraw) {
 
     g_png.getLineAsRGB565(pDraw, lineBuffer, PNG_RGB565_LITTLE_ENDIAN, 0xffffffff);
     for (int xx = 0; xx < pDraw->iWidth; xx++) {
-        blit_gray_to_thumb(g_thumbCtx, xx, pDraw->y, rgb565_to_gray(lineBuffer[xx]));
+        blit_gray_to_thumb(g_thumbCtx, xx, pDraw->y, image_rgb565_to_gray8(lineBuffer[xx]));
     }
 
     return 1;
@@ -147,8 +148,8 @@ static void store_cache_entry(const String& key, const ThumbContext& ctx) {
     g_thumbCache.push_back(entry);
 }
 
-bool cover_render_poster(const BookInfo& book, int x, int y, int w, int h) {
-    if (!book.hasCover || book.coverPath.length() == 0) return false;
+bool cover_render_poster(BookInfo& book, int x, int y, int w, int h) {
+    if (!cover_can_render_poster(book)) return false;
 
     int innerPad = 12;
     int maxW = std::max(1, w - innerPad * 2);
@@ -241,6 +242,8 @@ bool cover_render_poster(const BookInfo& book, int x, int y, int w, int h) {
         draw_thumb_pixels(ctx.dstX, ctx.dstY, ctx.dstW, ctx.dstH, ctx.pixels);
         display_draw_rect(x + 6, y + 6, w - 12, h - 12, 12);
         store_cache_entry(cacheKey, ctx);
+    } else {
+        book.posterCoverFailed = true;
     }
 
     free(ctx.pixels);

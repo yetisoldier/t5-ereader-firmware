@@ -214,9 +214,69 @@ static void wrapPosterTitle(const String& title, int maxWidth, int maxLines,
     }
 }
 
-static void drawDefaultPoster(const BookInfo& book, int x, int y, int w, int h) {
-    if (settings_get().posterShowCovers && cover_render_poster(book, x, y, w, h)) {
-        return;
+static void drawPosterFallbackTile(const BookInfo& book, int x, int y, int w, int h) {
+    display_draw_filled_rect(x, y, w, h, 15);
+    display_draw_rect(x, y, w, h, 8);
+
+    display_draw_filled_rect(x + 10, y + 10, w - 20, 20, 13);
+    const char* band = "BOOK";
+    int bandW = display_text_width(band);
+    display_draw_text(x + (w - bandW) / 2, y + 24, band, 6);
+
+    std::vector<String> titleLines;
+    wrapPosterTitle(book.title, w - 24, 4, titleLines);
+
+    int titleBlockTop = y + 62;
+    int lineStep = FONT_H - 6;
+    int availH = h - 110;
+    int totalHeight = (int)titleLines.size() * lineStep;
+    int ty = titleBlockTop + max(0, (availH - totalHeight) / 2);
+    for (const auto& line : titleLines) {
+        int lw = display_text_width(line.c_str());
+        display_draw_text(x + (w - lw) / 2, ty, line.c_str(), 0);
+        ty += lineStep;
+    }
+
+    String info = book.filepath;
+    int ls = info.lastIndexOf('/');
+    if (ls >= 0) info = info.substring(ls + 1);
+    if (info.length() > 32) info = info.substring(0, 29) + "...";
+    int infoW = display_text_width(info.c_str());
+    display_draw_text(x + (w - infoW) / 2, y + h - 38, info.c_str(), 8);
+
+    if (book.hasProgress && book.totalChapters > 0) {
+        int pct = (book.progressChapter * 100) / max(1, book.totalChapters);
+        if (pct > 100) pct = 100;
+        char pctStr[10];
+        snprintf(pctStr, sizeof(pctStr), "%d%%", pct);
+        display_draw_text(x + 14, y + h - 18, pctStr, 4);
+    }
+}
+
+static void drawDefaultPoster(BookInfo& book, int x, int y, int w, int h) {
+    if (settings_get().posterShowCovers) {
+        if (book.posterCoverFailed) {
+            drawPosterFallbackTile(book, x, y, w, h);
+            return;
+        }
+
+        if (!cover_can_render_poster(book)) {
+            if (book.hasCover && book.coverPath.length() > 0) {
+                book.posterCoverFailed = true;
+                Serial.printf("Poster fallback: %s uses non-poster mode (unsupported cover format: %s)\n",
+                              book.filepath.c_str(), book.coverPath.c_str());
+                drawPosterFallbackTile(book, x, y, w, h);
+                return;
+            }
+        } else if (cover_render_poster(book, x, y, w, h)) {
+            return;
+        } else {
+            book.posterCoverFailed = true;
+            Serial.printf("Poster fallback: %s will use non-poster mode (cover render failed)\n",
+                          book.filepath.c_str());
+            drawPosterFallbackTile(book, x, y, w, h);
+            return;
+        }
     }
 
     display_draw_filled_rect(x, y, w, h, 15);

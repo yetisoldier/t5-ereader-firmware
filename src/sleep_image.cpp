@@ -9,6 +9,7 @@
 #include <PNGdec.h>
 #include "config.h"
 #include "display.h"
+#include "image_tone.h"
 
 static JPEGDEC g_jpeg;
 static PNG g_png;
@@ -83,13 +84,7 @@ static void pngFileClose(void* handle) {
     delete file;
 }
 
-static inline uint8_t rgb565_to_gray4(uint16_t px) {
-    uint8_t r = ((px >> 11) & 0x1F) << 3;
-    uint8_t g = ((px >> 5) & 0x3F) << 2;
-    uint8_t b = (px & 0x1F) << 3;
-    uint8_t gray8 = (uint8_t)((r * 38 + g * 75 + b * 15) >> 7);
-    return gray8 >> 4;  // 0=black, 15=white — EPD convention
-}
+
 
 static inline void plot_scaled(int sx, int sy, uint8_t gray4) {
     if (!g_ctx || g_ctx->srcW <= 0 || g_ctx->srcH <= 0) return;
@@ -106,7 +101,7 @@ static int jpegDrawCallback(JPEGDRAW* pDraw) {
             int sx = pDraw->x + xx;
             int sy = pDraw->y + yy;
             uint16_t px = pDraw->pPixels[yy * pDraw->iWidth + xx];
-            plot_scaled(sx, sy, rgb565_to_gray4(px));
+            plot_scaled(sx, sy, image_rgb565_to_gray4(px));
         }
     }
     return 1;
@@ -116,7 +111,7 @@ static int pngDrawCallback(PNGDRAW* pDraw) {
     if (!g_ctx || !pDraw || !g_ctx->pngLineBuffer) return 0;
     g_png.getLineAsRGB565(pDraw, g_ctx->pngLineBuffer, PNG_RGB565_LITTLE_ENDIAN, 0xffffffff);
     for (int xx = 0; xx < pDraw->iWidth; xx++) {
-        plot_scaled(xx, pDraw->y, rgb565_to_gray4(g_ctx->pngLineBuffer[xx]));
+        plot_scaled(xx, pDraw->y, image_rgb565_to_gray4(g_ctx->pngLineBuffer[xx]));
     }
     return 1;
 }
