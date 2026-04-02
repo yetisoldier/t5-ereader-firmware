@@ -53,6 +53,11 @@ static bool buttonWasPressed = false;
 static const unsigned long BUTTON_DEBOUNCE_MS = 50;
 static const unsigned long BUTTON_POWER_MS = 600;  // hold 600ms to power off
 
+// ─── Center button: single/double press for page navigation ─────────
+static unsigned long lastButtonReleaseTime = 0;
+static int buttonPressCount = 0;
+static const unsigned long DOUBLE_PRESS_WINDOW_MS = 400;
+
 // ─── Layout helpers ─────────────────────────────────────────────────
 static const int W = PORTRAIT_W;
 static const int H = PORTRAIT_H;
@@ -903,6 +908,12 @@ static void drawSettingsScreen() {
     int rw = display_text_width(resetLabel);
     display_draw_text(MARGIN_X, y + FONT_H - 4, resetLabel, 3);
 
+    // Firmware version
+    char verLabel[32];
+    snprintf(verLabel, sizeof(verLabel), "Firmware: v%s", FIRMWARE_VERSION);
+    int vw = display_text_width(verLabel);
+    display_draw_text(W - MARGIN_X - vw, y + FONT_H - 4, verLabel, 8);
+
     drawBottomBar("[ Back ]");
     display_update_fast();
     needsRedraw = false;
@@ -1472,12 +1483,69 @@ void setup() {
     Serial.println("Setup complete");
 }
 
+// Helper: advance or go back one page via the physical button
+static void buttonPageForward() {
+    lastActivity = millis();
+    if (appState == STATE_READER) {
+        if (reader.nextPage()) {
+            readerFastRefresh = !reader.didChapterChange();
+            if (reader.didChapterChange()) readerChapterJump = true;
+            needsRedraw = true;
+        }
+    } else if (appState == STATE_LIBRARY && !books.empty()) {
+        const Settings& s = settings_get();
+        int listStartY = HEADER_HEIGHT + MARGIN_Y;
+        if (library_find_current_book(books) >= 0) listStartY += FONT_H + 20;
+        int itemsPerPage;
+        if (s.libraryViewMode == 1) {
+            int posterH = 310;
+            int rowsVisible = max(1, (H - listStartY - FOOTER_HEIGHT - MARGIN_Y) / (posterH + 14));
+            itemsPerPage = rowsVisible * 2;
+        } else {
+            itemsPerPage = (H - listStartY - FOOTER_HEIGHT - MARGIN_Y) / BOOK_ITEM_H;
+        }
+        if (libraryScroll + itemsPerPage < (int)books.size()) {
+            libraryScroll += itemsPerPage;
+            needsRedraw = true;
+        }
+    }
+}
+
+static void buttonPageBackward() {
+    lastActivity = millis();
+    if (appState == STATE_READER) {
+        if (reader.prevPage()) {
+            readerFastRefresh = !reader.didChapterChange();
+            if (reader.didChapterChange()) readerChapterJump = true;
+            needsRedraw = true;
+        }
+    } else if (appState == STATE_LIBRARY && !books.empty()) {
+        const Settings& s = settings_get();
+        int listStartY = HEADER_HEIGHT + MARGIN_Y;
+        if (library_find_current_book(books) >= 0) listStartY += FONT_H + 20;
+        int itemsPerPage;
+        if (s.libraryViewMode == 1) {
+            int posterH = 310;
+            int rowsVisible = max(1, (H - listStartY - FOOTER_HEIGHT - MARGIN_Y) / (posterH + 14));
+            itemsPerPage = rowsVisible * 2;
+        } else {
+            itemsPerPage = (H - listStartY - FOOTER_HEIGHT - MARGIN_Y) / BOOK_ITEM_H;
+        }
+        if (libraryScroll > 0) {
+            libraryScroll -= itemsPerPage;
+            if (libraryScroll < 0) libraryScroll = 0;
+            needsRedraw = true;
+        }
+    }
+}
+
 void loop() {
     if (appState == STATE_WIFI) {
         wifi_upload_handle();
     }
 
     // Poll top button (GPIO 21) — active LOW
+    // Hold = sleep, single press = next page, double press = prev page
     bool buttonPressed = (digitalRead(BUTTON_PIN) == LOW);
     if (buttonPressed && !buttonWasPressed) {
         buttonDownTime = millis();
@@ -1487,8 +1555,28 @@ void loop() {
             Serial.println("Top button held — entering deep sleep");
             enterDeepSleep(true);
         }
+    } else if (!buttonPressed && buttonWasPressed) {
+        // Button released — count presses for single/double detection
+        unsigned long heldMs = millis() - buttonDownTime;
+        if (heldMs >= BUTTON_DEBOUNCE_MS && heldMs < BUTTON_POWER_MS) {
+            buttonPressCount++;
+            lastButtonReleaseTime = millis();
+        }
     }
     buttonWasPressed = buttonPressed;
+
+    // Resolve single vs double press after the double-press window expires
+    if (buttonPressCount > 0 && !buttonPressed &&
+        (millis() - lastButtonReleaseTime >= DOUBLE_PRESS_WINDOW_MS)) {
+        if (buttonPressCount >= 2) {
+            Serial.println("Button double-press — previous page");
+            buttonPageBackward();
+        } else {
+            Serial.println("Button single-press — next page");
+            buttonPageForward();
+        }
+        buttonPressCount = 0;
+    }
 
     // Poll touch with long-press detection
     static bool lastTouchState = false;
@@ -1516,25 +1604,60 @@ void loop() {
             unsigned long duration = millis() - touchDownTime;
             bool isLongPress = (duration >= LONG_PRESS_MS);
 
-            // Detect horizontal swipe in reader mode
+            // Detect horizontal swipe in reader and library modes
             bool swipeHandled = false;
-            if (appState == STATE_READER && absDx > 60 && absDy < 80) {
-                if (dx < 0) {
-                    // Swipe left → next page
-                    if (reader.nextPage()) {
-                        readerFastRefresh = !reader.didChapterChange();
-                        if (reader.didChapterChange()) readerChapterJump = true;
-                        needsRedraw = true;
+            if (absDx > 60 && absDy < 80) {
+                if (appState == STATE_READER) {
+                    if (dx < 0) {
+                        // Swipe left → next page
+                        if (reader.nextPage()) {
+                            readerFastRefresh = !reader.didChapterChange();
+                            if (reader.didChapterChange()) readerChapterJump = true;
+                            needsRedraw = true;
+                        }
+                        swipeHandled = true;
+                    } else {
+                        // Swipe right → prev page
+                        if (reader.prevPage()) {
+                            readerFastRefresh = !reader.didChapterChange();
+                            if (reader.didChapterChange()) readerChapterJump = true;
+                            needsRedraw = true;
+                        }
+                        swipeHandled = true;
                     }
-                    swipeHandled = true;
-                } else {
-                    // Swipe right → prev page
-                    if (reader.prevPage()) {
-                        readerFastRefresh = !reader.didChapterChange();
-                        if (reader.didChapterChange()) readerChapterJump = true;
-                        needsRedraw = true;
+                } else if (appState == STATE_LIBRARY && !books.empty()) {
+                    // Library swipe: compute items per page for current view mode
+                    const Settings& s = settings_get();
+                    int itemsPerPage;
+                    if (s.libraryViewMode == 1) {
+                        // Poster view
+                        int listStartY = HEADER_HEIGHT + MARGIN_Y;
+                        if (library_find_current_book(books) >= 0) listStartY += FONT_H + 20;
+                        int posterH = 310;
+                        int rowsVisible = max(1, (H - listStartY - FOOTER_HEIGHT - MARGIN_Y) / (posterH + 14));
+                        itemsPerPage = rowsVisible * 2;
+                    } else {
+                        // List view
+                        int listStartY = HEADER_HEIGHT + MARGIN_Y;
+                        if (library_find_current_book(books) >= 0) listStartY += FONT_H + 20;
+                        itemsPerPage = (H - listStartY - FOOTER_HEIGHT - MARGIN_Y) / BOOK_ITEM_H;
                     }
-                    swipeHandled = true;
+                    if (dx < 0) {
+                        // Swipe left → next page of books
+                        if (libraryScroll + itemsPerPage < (int)books.size()) {
+                            libraryScroll += itemsPerPage;
+                            needsRedraw = true;
+                        }
+                        swipeHandled = true;
+                    } else {
+                        // Swipe right → prev page of books
+                        if (libraryScroll > 0) {
+                            libraryScroll -= itemsPerPage;
+                            if (libraryScroll < 0) libraryScroll = 0;
+                            needsRedraw = true;
+                        }
+                        swipeHandled = true;
+                    }
                 }
             }
 

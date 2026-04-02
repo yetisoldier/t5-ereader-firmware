@@ -1,5 +1,8 @@
 #pragma once
 
+// ─── Firmware Version ──────────────────────────────────────────────
+#define FIRMWARE_VERSION "0.2.0"
+
 // ─── WiFi Credentials ───────────────────────────────────────────────
 // Copy this file to config.h and fill in your WiFi details.
 // WiFi is used for the wireless book upload feature.
