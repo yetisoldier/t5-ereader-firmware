@@ -128,7 +128,9 @@ The screenshots below are now copied into `docs/screenshots/` so they render inl
 ![Library Screen](docs/screenshots/library-screen.jpg)
 
 ### Settings Screen
-![Settings Screen](docs/screenshots/settings-screen.jpg)
+- No confident e-reader settings screenshot was available in the current media set.
+- The previously copied `docs/screenshots/settings-screen.jpg` was a board photo, not a settings page, so it has been removed from the gallery.
+- Please provide the original settings screenshot if you want this section restored.
 
 ### Reading Screen
 ![Reading Screen](docs/screenshots/reading-screen.jpg)
