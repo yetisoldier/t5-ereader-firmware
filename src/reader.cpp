@@ -38,16 +38,14 @@ void BookReader::recalculateLayout() {
     const Settings& s = settings_get();
 
     // Switch the actual font in the display module
-    display_set_font_size(s.fontSize);
+    int level = s.fontSizeLevel;
+    if (level < 0) level = 0;
+    if (level >= FONT_SIZE_LEVEL_COUNT) level = FONT_SIZE_LEVEL_COUNT - 1;
+    display_set_font(level, s.serifFont);
 
-    // Margins and line spacing scale with font size
-    int lineSpacing;
-    int marginX;
-    switch (s.fontSize) {
-        case 0: lineSpacing = FONT_LINE_SPACING_SMALL;  marginX = FONT_MARGIN_X_SMALL;  break;
-        case 2: lineSpacing = FONT_LINE_SPACING_LARGE;  marginX = FONT_MARGIN_X_LARGE;  break;
-        default: lineSpacing = FONT_LINE_SPACING_MEDIUM; marginX = FONT_MARGIN_X_MEDIUM; break;
-    }
+    // Margins and line spacing scale with font size level
+    int lineSpacing = FONT_LINE_SPACINGS[level];
+    int marginX = FONT_MARGIN_X_VALUES[level];
 
     int bodyFontH = display_font_height();
     // The footer already reserves its own area, so only a tiny extra buffer is
@@ -60,8 +58,8 @@ void BookReader::recalculateLayout() {
     if (_linesPerPage < 1) _linesPerPage = 1;
     _maxLineWidth = usableWidth;
 
-    Serial.printf("Layout: font=%d, fontH=%d, lineSpacing=%d, linesPerPage=%d, maxWidth=%d\n",
-                  s.fontSize, bodyFontH, lineSpacing, _linesPerPage, _maxLineWidth);
+    Serial.printf("Layout: fontLevel=%d, serif=%d, fontH=%d, lineSpacing=%d, linesPerPage=%d, maxWidth=%d\n",
+                  s.fontSizeLevel, s.serifFont, bodyFontH, lineSpacing, _linesPerPage, _maxLineWidth);
 }
 
 void BookReader::closeBook() {

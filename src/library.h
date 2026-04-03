@@ -17,8 +17,17 @@ struct BookInfo {
     bool posterCoverFailed = false; // runtime-only fallback when poster rendering is broken
 };
 
+enum LibraryFilter {
+    FILTER_ALL,
+    FILTER_NEW,        // No progress file
+    FILTER_READING,    // Has progress, not finished
+    FILTER_FINISHED,   // Progress at last chapter
+};
+
 bool library_init();
 std::vector<BookInfo> library_scan();
+std::vector<int> library_filter(const std::vector<BookInfo>& books,
+                                 LibraryFilter filter);
 
 // Returns index of the most-recently-read book (with progress), or -1
 int library_find_current_book(const std::vector<BookInfo>& books);

@@ -281,6 +281,35 @@ std::vector<BookInfo> library_scan() {
     return books;
 }
 
+std::vector<int> library_filter(const std::vector<BookInfo>& books,
+                                 LibraryFilter filter) {
+    std::vector<int> indices;
+    for (int i = 0; i < (int)books.size(); i++) {
+        const BookInfo& b = books[i];
+        switch (filter) {
+            case FILTER_ALL:
+                indices.push_back(i);
+                break;
+            case FILTER_NEW:
+                if (!b.hasProgress) indices.push_back(i);
+                break;
+            case FILTER_READING:
+                if (b.hasProgress && b.totalChapters > 0 &&
+                    b.progressChapter < b.totalChapters - 1) {
+                    indices.push_back(i);
+                }
+                break;
+            case FILTER_FINISHED:
+                if (b.hasProgress && b.totalChapters > 0 &&
+                    b.progressChapter >= b.totalChapters - 1) {
+                    indices.push_back(i);
+                }
+                break;
+        }
+    }
+    return indices;
+}
+
 int library_find_current_book(const std::vector<BookInfo>& books) {
     // Find the book with the highest lastReadOrder (most recently read)
     int bestIdx = -1;

@@ -1,9 +1,22 @@
 #include "display.h"
 #include "config.h"
 #include "epd_driver.h"
-#include "font_small.h"
-#include "font_medium.h"
-#include "font_large.h"
+// Sans-serif fonts (FiraSans) — 7 sizes: XS(9pt) S(11pt) M(14pt) ML(17pt) L(20pt) XL(24pt) XXL(28pt)
+#include "font_xs.h"
+#include "font_s.h"
+#include "font_m.h"
+#include "font_ml.h"
+#include "font_l.h"
+#include "font_xl.h"
+#include "font_xxl.h"
+// Serif fonts (NotoSerif) — same 7 sizes
+#include "font_serif_xs.h"
+#include "font_serif_s.h"
+#include "font_serif_m.h"
+#include "font_serif_ml.h"
+#include "font_serif_l.h"
+#include "font_serif_xl.h"
+#include "font_serif_xxl.h"
 #include "miniz.h"
 // EPD whine mitigation: the epdiy I2S bus clock can produce an audible
 // whine.  Aggressive approaches (clock-gating I2S1, driving CKH/CKV LOW)
@@ -17,8 +30,17 @@ static uint8_t* _pfb = nullptr;
 // Landscape framebuffer for pushing to hardware: 960 wide × 540 tall
 static uint8_t* _lfb = nullptr;
 
-static const GFXfont* _fonts[] = { &FiraSansSmall, &FiraSansMedium, &FiraSansLarge };
-static const GFXfont* _font = &FiraSansMedium;  // default
+// 7 size levels × 2 families (sans index 0, serif index 1)
+static const GFXfont* _sans_fonts[] = {
+    &FiraSansXS, &FiraSansS, &FiraSansM, &FiraSansML,
+    &FiraSansL, &FiraSansXL, &FiraSansXXL
+};
+static const GFXfont* _serif_fonts[] = {
+    &NotoSerifXS, &NotoSerifS, &NotoSerifM, &NotoSerifML,
+    &NotoSerifL, &NotoSerifXL, &NotoSerifXXL
+};
+static const int FONT_SIZE_COUNT = 7;
+static const GFXfont* _font = &FiraSansM;  // default (level 2 = M)
 
 // Full refresh counter — every N partial updates, do a full refresh
 static int _partialCount = 0;
@@ -422,11 +444,18 @@ int display_height() {
     return PORTRAIT_H;
 }
 
-void display_set_font_size(int size) {
-    if (size >= 0 && size <= 2) {
-        _font = _fonts[size];
-        Serial.printf("Font set to size %d (advance_y=%d)\n", size, _font->advance_y);
-    }
+void display_set_font_size(int sizeLevel) {
+    // Legacy: maps old 0/1/2 to new levels, always sans
+    // New callers pass 0-6 directly which also works fine
+    display_set_font(sizeLevel, false);
+}
+
+void display_set_font(int sizeLevel, bool serif) {
+    if (sizeLevel < 0) sizeLevel = 0;
+    if (sizeLevel >= FONT_SIZE_COUNT) sizeLevel = FONT_SIZE_COUNT - 1;
+    _font = serif ? _serif_fonts[sizeLevel] : _sans_fonts[sizeLevel];
+    Serial.printf("Font set to %s level %d (advance_y=%d)\n",
+                  serif ? "serif" : "sans", sizeLevel, _font->advance_y);
 }
 
 void display_power_off() {

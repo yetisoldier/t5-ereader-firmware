@@ -23,5 +23,6 @@ int  display_font_height();
 int  display_font_ascender();
 int  display_width();
 int  display_height();
-void display_set_font_size(int size);  // 0=small(14pt), 1=medium(20pt), 2=large(28pt)
+void display_set_font_size(int sizeLevel);        // 0-6: XS,S,M,ML,L,XL,XXL (legacy, sans only)
+void display_set_font(int sizeLevel, bool serif);  // 0-6 size level, serif/sans toggle
 void display_power_off();             // ensure EPD power rail is off

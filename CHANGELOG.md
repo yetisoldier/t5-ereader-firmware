@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.3.1 — 2026-04-03
+
+### Added
+- Seven font size levels: XS, S, M, ML, L, XL, XXL (replaces Small/Medium/Large)
+- Serif font toggle: choose between Fira Sans (sans-serif) and Noto Serif in Settings
+- OPDS client: browse and download books from Calibre servers or Project Gutenberg
+- Gutenberg genre browser with category picker (no keyboard required)
+- Library filter tabs: ALL / NEW / READING / DONE
+- Store button in library footer for OPDS access
+- QR code on the WiFi upload screen for quick URL access
+- Settings layout: Reset Defaults and Firmware version now displayed on a single line, properly spaced and vertically centered above the Back bar
+
+### Changed
+- Settings menu bottom row reformatted — Reset Defaults (left) and Firmware version (right) on one line
+
+---
+
 ## v0.3.0 — 2026-04-02
 
 ### Added

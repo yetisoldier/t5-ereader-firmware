@@ -12,8 +12,10 @@
 #include "inline_image.h"
 #include "ota_update.h"
 #include "gnome_splash.h"
+#include "opds_store.h"
 #include <WiFi.h>
 #include <Preferences.h>
+#include <qrcode.h>
 
 // ─── App State ──────────────────────────────────────────────────────
 enum AppState {
@@ -25,7 +27,9 @@ enum AppState {
     STATE_TOC,          // table of contents
     STATE_BOOKMARKS,    // bookmark list
     STATE_SETTINGS,     // settings page
-    STATE_OTA_CHECK     // OTA update check / download
+    STATE_OTA_CHECK,    // OTA update check / download
+    STATE_OPDS_BROWSE,  // Browsing OPDS catalog
+    STATE_OPDS_DOWNLOAD // Download in progress
 };
 
 static AppState       appState = STATE_BOOT;
@@ -42,6 +46,8 @@ static const int      READER_REFRESH_OVERDRAW_PX = 16;
 // ─── Library state ──────────────────────────────────────────────────
 static std::vector<BookInfo> books;
 static int libraryScroll = 0;
+static LibraryFilter libraryFilter = FILTER_ALL;
+static std::vector<int> filteredIndices;  // indices into books[] matching current filter
 
 // ─── Reader state ───────────────────────────────────────────────────
 static BookReader reader;
@@ -192,7 +198,7 @@ static void drawGnomeSplash(const char* statusMsg = "Starting up...") {
     // a few pixels above the bottom edge, so the glyphs were effectively drawn
     // off-screen. Use a footer-specific layout and the small UI font so both
     // lines fit cleanly in the reserved splash footer.
-    display_set_font_size(0);
+    display_set_font_size(1);
     const int splashFontH = display_font_height();
     const int versionY = bottomY1 - 10;
     const int statusY = max(separatorY2 + splashFontH + 10, versionY - splashFontH - 10);
@@ -205,7 +211,7 @@ static void drawGnomeSplash(const char* statusMsg = "Starting up...") {
     int vw = display_text_width(verStr);
     display_draw_text((SPLASH_WIDTH - vw) / 2, versionY, verStr, 8);
 
-    display_set_font_size(1);
+    display_set_font_size(2);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -349,11 +355,43 @@ static void drawDefaultPoster(BookInfo& book, int x, int y, int w, int h) {
     }
 }
 
+static const char* filterNames[] = {"ALL", "NEW", "READING", "DONE"};
+static const int NUM_FILTERS = 4;
+static const int FILTER_TAB_H = 44;
+
+static void drawFilterTabs() {
+    int tabY = HEADER_HEIGHT;
+    display_draw_filled_rect(0, tabY, W, FILTER_TAB_H, 14);
+
+    int tabW = W / NUM_FILTERS;
+    for (int i = 0; i < NUM_FILTERS; i++) {
+        int tx = i * tabW;
+        if (i == (int)libraryFilter) {
+            display_draw_filled_rect(tx + 2, tabY + 2, tabW - 4, FILTER_TAB_H - 4, 15);
+            display_draw_hline(tx + 2, tabY + FILTER_TAB_H - 2, tabW - 4, 0);
+        }
+        int tw = display_text_width(filterNames[i]);
+        uint8_t color = (i == (int)libraryFilter) ? 0 : 6;
+        display_draw_text(tx + (tabW - tw) / 2, tabY + FILTER_TAB_H - 10, filterNames[i], color);
+    }
+    display_draw_hline(0, tabY + FILTER_TAB_H, W, 10);
+}
+
+static void updateFilteredIndices() {
+    filteredIndices = library_filter(books, libraryFilter);
+}
+
 static void drawLibraryScreen() {
-    display_set_font_size(1);  // UI always uses medium font
+    display_set_font_size(2);  // UI always uses M(14pt) font
     display_fill_screen(15);
     drawHeader("Library");
+    drawFilterTabs();
     const Settings& s = settings_get();
+
+    // Use filtered book list
+    const auto& visibleIdx = filteredIndices;
+
+    int numVisible = (int)visibleIdx.size();
 
     if (books.empty()) {
         int cy = H / 2 - 60;
@@ -375,11 +413,16 @@ static void drawLibraryScreen() {
         const char* line4 = "or use Settings > Upload";
         int w4 = display_text_width(line4);
         display_draw_text((W - w4) / 2, cy, line4, 6);
+    } else if (numVisible == 0) {
+        int cy = H / 2 - 20;
+        const char* msg = "No books match filter";
+        int mw = display_text_width(msg);
+        display_draw_text((W - mw) / 2, cy, msg, 6);
     } else if (s.libraryViewMode == 1) {
-        int y = HEADER_HEIGHT + MARGIN_Y;
+        int y = HEADER_HEIGHT + FILTER_TAB_H + MARGIN_Y;
 
         int currentIdx = library_find_current_book(books);
-        if (currentIdx >= 0) {
+        if (currentIdx >= 0 && libraryFilter == FILTER_ALL) {
             display_draw_filled_rect(0, y, W, FONT_H + 16, 14);
             display_draw_text(MARGIN_X, y + FONT_H + 2, "Continue Reading:", 4);
 
@@ -391,7 +434,7 @@ static void drawLibraryScreen() {
             }
             display_draw_text(MARGIN_X + labelW, y + FONT_H + 2, contTitle.c_str(), 0);
             display_draw_hline(0, y + FONT_H + 16, W, 10);
-            y += FONT_H + 20;
+            y += FONT_H + 16 + MARGIN_Y;  // equal padding below banner as above
         }
 
         const int cols = 2;
@@ -401,52 +444,55 @@ static void drawLibraryScreen() {
         int rowsVisible = max(1, (H - y - FOOTER_HEIGHT - MARGIN_Y) / (posterH + 14));
         int cardsPerPage = rowsVisible * cols;
 
-        for (int i = libraryScroll; i < (int)books.size() && i < libraryScroll + cardsPerPage; i++) {
-            int rel = i - libraryScroll;
+        for (int vi = libraryScroll; vi < numVisible && vi < libraryScroll + cardsPerPage; vi++) {
+            int bi = visibleIdx[vi];
+            int rel = vi - libraryScroll;
             int row = rel / cols;
             int col = rel % cols;
             int px = MARGIN_X + col * (posterW + gap);
             int py = y + row * (posterH + 14);
-            drawDefaultPoster(books[i], px, py, posterW, posterH);
+            drawDefaultPoster(books[bi], px, py, posterW, posterH);
         }
 
-        // Paging controls — always show page indicator, show arrows when multi-page
-        int pageInfoY = H - FOOTER_HEIGHT - FONT_H - 8;
-        if ((int)books.size() > cardsPerPage) {
-            bool hasPrev = (libraryScroll > 0);
-            bool hasNext = (libraryScroll + cardsPerPage < (int)books.size());
+        // Center pagination row between content bottom and footer top
+        int itemsOnPage = min(numVisible - libraryScroll, cardsPerPage);
+        int rowsOnPage = (itemsOnPage + cols - 1) / cols;
+        int contentBottom = y + (rowsOnPage > 0 ? (rowsOnPage - 1) * (posterH + 14) + posterH : y);
+        int footerTop = H - FOOTER_HEIGHT;
+        int pageInfoY = (contentBottom + footerTop) / 2 + FONT_H / 4;
 
-            // Left arrow
+        if (numVisible > cardsPerPage) {
+            bool hasPrev = (libraryScroll > 0);
+            bool hasNext = (libraryScroll + cardsPerPage < numVisible);
+
             if (hasPrev) {
                 display_draw_text(MARGIN_X, pageInfoY, "< Prev", 3);
             }
 
-            // Page info center
             char info[32];
             int curPage = libraryScroll / max(1, cardsPerPage) + 1;
-            int totalPg = ((int)books.size() + cardsPerPage - 1) / cardsPerPage;
+            int totalPg = (numVisible + cardsPerPage - 1) / cardsPerPage;
             snprintf(info, sizeof(info), "%d / %d", curPage, totalPg);
             int iw = display_text_width(info);
             display_draw_text(W / 2 - iw / 2, pageInfoY, info, 6);
 
-            // Right arrow
             if (hasNext) {
                 const char* next = "Next >";
                 int nw = display_text_width(next);
                 display_draw_text(W - MARGIN_X - nw, pageInfoY, next, 3);
             }
-        } else if ((int)books.size() > 0) {
+        } else if (numVisible > 0) {
             char info[32];
-            snprintf(info, sizeof(info), "%d books", (int)books.size());
+            snprintf(info, sizeof(info), "%d books", numVisible);
             int iw = display_text_width(info);
             display_draw_text(W / 2 - iw / 2, pageInfoY, info, 8);
         }
     } else {
-        int y = HEADER_HEIGHT + MARGIN_Y;
+        int y = HEADER_HEIGHT + FILTER_TAB_H + MARGIN_Y;
 
-        // "Continue Reading" banner
+        // "Continue Reading" banner (only in ALL filter)
         int currentIdx = library_find_current_book(books);
-        if (currentIdx >= 0) {
+        if (currentIdx >= 0 && libraryFilter == FILTER_ALL) {
             display_draw_filled_rect(0, y, W, FONT_H + 16, 14);
             display_draw_text(MARGIN_X, y + FONT_H + 2, "Continue Reading:", 4);
 
@@ -460,19 +506,20 @@ static void drawLibraryScreen() {
             display_draw_text(MARGIN_X + labelW, y + FONT_H + 2, contTitle.c_str(), 0);
 
             display_draw_hline(0, y + FONT_H + 16, W, 10);
-            y += FONT_H + 20;
+            y += FONT_H + 16 + MARGIN_Y;  // equal padding below banner as above
         }
 
         int maxVisible = (H - y - FOOTER_HEIGHT - MARGIN_Y) / BOOK_ITEM_H;
 
-        for (int i = libraryScroll;
-             i < (int)books.size() && i < libraryScroll + maxVisible; i++) {
-            String title = books[i].title;
+        for (int vi = libraryScroll;
+             vi < numVisible && vi < libraryScroll + maxVisible; vi++) {
+            int bi = visibleIdx[vi];
+            String title = books[bi].title;
 
             int badgeW = 0;
             char badge[16] = "";
-            if (books[i].hasProgress && books[i].totalChapters > 0) {
-                int pct = (books[i].progressChapter * 100) / books[i].totalChapters;
+            if (books[bi].hasProgress && books[bi].totalChapters > 0) {
+                int pct = (books[bi].progressChapter * 100) / books[bi].totalChapters;
                 if (pct > 100) pct = 100;
                 snprintf(badge, sizeof(badge), "%d%%", pct);
                 badgeW = display_text_width(badge) + 10;
@@ -490,7 +537,7 @@ static void drawLibraryScreen() {
                 display_draw_text(W - MARGIN_X - bw, y + FONT_H - 4, badge, 6);
             }
 
-            String info = books[i].filepath;
+            String info = books[bi].filepath;
             int ls = info.lastIndexOf('/');
             if (ls >= 0) info = info.substring(ls + 1);
             if (info.length() > 40) info = info.substring(0, 37) + "...";
@@ -501,11 +548,14 @@ static void drawLibraryScreen() {
             y += BOOK_ITEM_H;
         }
 
-        // Paging controls for list view
-        int pageInfoY = H - FOOTER_HEIGHT - FONT_H - 8;
-        if ((int)books.size() > maxVisible) {
+        // Center pagination row between content bottom and footer top
+        int contentBottom = y;  // y already advanced past last drawn item
+        int footerTop = H - FOOTER_HEIGHT;
+        int pageInfoY = (contentBottom + footerTop) / 2 + FONT_H / 4;
+
+        if (numVisible > maxVisible) {
             bool hasPrev = (libraryScroll > 0);
-            bool hasNext = (libraryScroll + maxVisible < (int)books.size());
+            bool hasNext = (libraryScroll + maxVisible < numVisible);
 
             if (hasPrev) {
                 display_draw_text(MARGIN_X, pageInfoY, "< Prev", 3);
@@ -513,7 +563,7 @@ static void drawLibraryScreen() {
 
             char info[32];
             int curPage = libraryScroll / max(1, maxVisible) + 1;
-            int totalPg = ((int)books.size() + maxVisible - 1) / maxVisible;
+            int totalPg = (numVisible + maxVisible - 1) / maxVisible;
             snprintf(info, sizeof(info), "%d / %d", curPage, totalPg);
             int iw = display_text_width(info);
             display_draw_text(W / 2 - iw / 2, pageInfoY, info, 6);
@@ -526,7 +576,7 @@ static void drawLibraryScreen() {
         }
     }
 
-    drawBottomBar("[ Settings ]");
+    drawBottomBarSplit("[ Store ]", "[ Settings ]");
 
     if (firstLibraryDraw) {
         firstLibraryDraw = false;
@@ -543,14 +593,12 @@ static void drawLibraryScreen() {
 
 static void drawReaderScreen() {
     const Settings& s = settings_get();
-    display_set_font_size(s.fontSize);  // use reader's selected font
-    int marginX;
-    int lineSpacing;
-    switch (s.fontSize) {
-        case 0: lineSpacing = FONT_LINE_SPACING_SMALL;  marginX = FONT_MARGIN_X_SMALL;  break;
-        case 2: lineSpacing = FONT_LINE_SPACING_LARGE;  marginX = FONT_MARGIN_X_LARGE;  break;
-        default: lineSpacing = FONT_LINE_SPACING_MEDIUM; marginX = FONT_MARGIN_X_MEDIUM; break;
-    }
+    int level = s.fontSizeLevel;
+    if (level < 0) level = 0;
+    if (level >= FONT_SIZE_LEVEL_COUNT) level = FONT_SIZE_LEVEL_COUNT - 1;
+    display_set_font(level, s.serifFont);
+    int marginX = FONT_MARGIN_X_VALUES[level];
+    int lineSpacing = FONT_LINE_SPACINGS[level];
 
     display_fill_screen(15);
 
@@ -925,7 +973,8 @@ static void drawBookmarksScreen() {
 // Settings screen
 // ═══════════════════════════════════════════════════════════════════
 
-static const char* fontSizeNames[] = {"Small", "Medium", "Large"};
+static const char* fontSizeNames[] = {"XS", "S", "M", "M-L", "L", "XL", "XXL"};
+static const int NUM_FONT_SIZES = 7;
 static const char* libraryViewNames[] = {"List", "Poster"};
 static const int sleepOptions[] = {2, 5, 10, 15, 30};
 static const int NUM_SLEEP_OPTIONS = 5;
@@ -960,19 +1009,27 @@ static void drawSettingsScreen() {
     // Font Size — draw label in UI font, then preview in selected font
     display_draw_text(labelX, y + FONT_H - 4, "Font Size", 0);
     char fsLabel[32];
-    snprintf(fsLabel, sizeof(fsLabel), "< %s >", fontSizeNames[s.fontSize]);
+    snprintf(fsLabel, sizeof(fsLabel), "< %s >", fontSizeNames[s.fontSizeLevel]);
     int fsw = display_text_width(fsLabel);
     display_draw_text(W - MARGIN_X - fsw, y + FONT_H - 4, fsLabel, 3);
     display_draw_hline(MARGIN_X, y + SETTINGS_ROW_H - 4, W - MARGIN_X * 2, 12);
     y += SETTINGS_ROW_H;
 
-    // Font preview line in the selected font size
-    display_set_font_size(s.fontSize);
+    // Font Family (serif/sans toggle)
+    display_draw_text(labelX, y + FONT_H - 4, "Font Family", 0);
+    const char* familyLabel = s.serifFont ? "< Serif >" : "< Sans >";
+    int ffw = display_text_width(familyLabel);
+    display_draw_text(W - MARGIN_X - ffw, y + FONT_H - 4, familyLabel, 3);
+    display_draw_hline(MARGIN_X, y + SETTINGS_ROW_H - 4, W - MARGIN_X * 2, 12);
+    y += SETTINGS_ROW_H;
+
+    // Font preview line in the selected font size + family
+    display_set_font(s.fontSizeLevel, s.serifFont);
     const char* preview = "The quick brown fox jumps over the lazy dog";
     display_draw_text(labelX, y + display_font_height() - 4, preview, 6);
     display_draw_hline(MARGIN_X, y + SETTINGS_ROW_H - 4, W - MARGIN_X * 2, 12);
     y += SETTINGS_ROW_H;
-    display_set_font_size(1);  // back to UI font
+    display_set_font_size(2);  // back to UI font
 
     // Sleep Timeout
     display_draw_text(labelX, y + FONT_H - 4, "Sleep Timeout", 0);
@@ -1058,17 +1115,19 @@ static void drawSettingsScreen() {
     display_draw_hline(MARGIN_X, y + SETTINGS_ROW_H - 4, W - MARGIN_X * 2, 12);
     y += SETTINGS_ROW_H;
 
-    // Reset Defaults button
-    y += 20;
-    const char* resetLabel = "[ Reset Defaults ]";
-    int rw = display_text_width(resetLabel);
-    display_draw_text(MARGIN_X, y + FONT_H - 4, resetLabel, 3);
+    // Reset Defaults + Firmware version — same line, vertically centered in gap
+    {
+        int footerTop = H - FOOTER_HEIGHT;
+        int baseY = y + (footerTop - y) / 2 + FONT_H / 2 - 4;
 
-    // Firmware version
-    char verLabel[32];
-    snprintf(verLabel, sizeof(verLabel), "Firmware: v%s", FIRMWARE_VERSION);
-    int vw = display_text_width(verLabel);
-    display_draw_text(W - MARGIN_X - vw, y + FONT_H - 4, verLabel, 8);
+        const char* resetLabel = "[ Reset Defaults ]";
+        display_draw_text(MARGIN_X, baseY, resetLabel, 3);
+
+        char verLabel[32];
+        snprintf(verLabel, sizeof(verLabel), "Firmware: v%s", FIRMWARE_VERSION);
+        int vw = display_text_width(verLabel);
+        display_draw_text(W - MARGIN_X - vw, baseY, verLabel, 8);
+    }
 
     drawBottomBar("[ Back ]");
     if (settingsFromLibrary) {
@@ -1285,31 +1344,53 @@ static void handleOtaTouch(int x, int y) {
 // WiFi screen
 // ═══════════════════════════════════════════════════════════════════
 
+static void drawQrCode(const char* text, int cx, int cy, int moduleSize) {
+    QRCode qrcode;
+    uint8_t qrcodeData[qrcode_getBufferSize(3)];
+    qrcode_initText(&qrcode, qrcodeData, 3, ECC_LOW, text);
+
+    int qrSize = qrcode.size * moduleSize;
+    int startX = cx - qrSize / 2;
+    int startY = cy - qrSize / 2;
+
+    // White background with border
+    display_draw_filled_rect(startX - 8, startY - 8, qrSize + 16, qrSize + 16, 15);
+
+    for (uint8_t row = 0; row < qrcode.size; row++) {
+        for (uint8_t col = 0; col < qrcode.size; col++) {
+            if (qrcode_getModule(&qrcode, col, row)) {
+                display_draw_filled_rect(startX + col * moduleSize,
+                                          startY + row * moduleSize,
+                                          moduleSize, moduleSize, 0);
+            }
+        }
+    }
+}
+
 static void drawWifiScreen() {
     display_fill_screen(15);
     drawHeader("WiFi Upload");
 
-    int y = HEADER_HEIGHT + 60;
+    int y = HEADER_HEIGHT + 40;
 
     if (wifi_upload_running()) {
         const char* l1 = "WiFi connected";
         int w1 = display_text_width(l1);
         display_draw_text((W - w1) / 2, y, l1, 0);
-        y += FONT_H + 20;
+        y += FONT_H + 12;
 
         String ipStr = "http://" + wifi_upload_ip();
         int w2 = display_text_width(ipStr.c_str());
         display_draw_text((W - w2) / 2, y, ipStr.c_str(), 0);
-        y += FONT_H + 20;
+        y += FONT_H + 12;
 
-        const char* l3 = "Open in browser to";
+        const char* l3 = "Scan to open upload page";
         int w3 = display_text_width(l3);
         display_draw_text((W - w3) / 2, y, l3, 6);
-        y += FONT_H + 4;
+        y += FONT_H + 20;
 
-        const char* l4 = "upload .epub files";
-        int w4 = display_text_width(l4);
-        display_draw_text((W - w4) / 2, y, l4, 6);
+        // QR code for the upload URL
+        drawQrCode(ipStr.c_str(), W / 2, y + 120, 5);
     } else {
         const char* l1 = "Connecting to WiFi...";
         int w1 = display_text_width(l1);
@@ -1329,23 +1410,43 @@ static void drawWifiScreen() {
 // ═══════════════════════════════════════════════════════════════════
 
 static void handleLibraryTouch(int x, int y) {
-    // Bottom bar — settings only
+    // Bottom bar — Store (left) / Settings (right)
     if (y > H - FOOTER_HEIGHT) {
-        appState = STATE_SETTINGS;
-        settingsFromLibrary = true;
-        needsRedraw = true;
+        if (x < W / 2) {
+            opds_store_init();
+            appState = STATE_OPDS_BROWSE;
+            needsRedraw = true;
+        } else {
+            appState = STATE_SETTINGS;
+            settingsFromLibrary = true;
+            needsRedraw = true;
+        }
         return;
     }
 
-    if (books.empty()) return;
+    // Filter tabs
+    if (y >= HEADER_HEIGHT && y < HEADER_HEIGHT + FILTER_TAB_H) {
+        int tabW = W / NUM_FILTERS;
+        int newFilter = x / tabW;
+        if (newFilter >= 0 && newFilter < NUM_FILTERS && newFilter != (int)libraryFilter) {
+            libraryFilter = (LibraryFilter)newFilter;
+            libraryScroll = 0;
+            updateFilteredIndices();
+            needsRedraw = true;
+        }
+        return;
+    }
+
+    if (books.empty() || filteredIndices.empty()) return;
 
     const Settings& s = settings_get();
+    int numVisible = (int)filteredIndices.size();
 
     // "Continue Reading" banner
     int currentIdx = library_find_current_book(books);
-    int listStartY = HEADER_HEIGHT + MARGIN_Y;
-    if (currentIdx >= 0) {
-        int bannerBottom = listStartY + FONT_H + 20;
+    int listStartY = HEADER_HEIGHT + FILTER_TAB_H + MARGIN_Y;
+    if (currentIdx >= 0 && libraryFilter == FILTER_ALL) {
+        int bannerBottom = listStartY + FONT_H + 16 + MARGIN_Y;
         if (y > listStartY && y < bannerBottom) {
             Serial.printf("Continue reading: %s\n", books[currentIdx].filepath.c_str());
             if (reader.openBook(books[currentIdx].filepath.c_str())) {
@@ -1375,10 +1476,11 @@ static void handleLibraryTouch(int x, int y) {
                 for (int col = 0; col < cols; col++) {
                     int px = MARGIN_X + col * (posterW + gap);
                     if (x >= px && x < px + posterW) {
-                        int idx = libraryScroll + row * cols + col;
-                        if (idx >= 0 && idx < (int)books.size() && idx < libraryScroll + cardsPerPage) {
-                            Serial.printf("Opening book: %s\n", books[idx].filepath.c_str());
-                            if (reader.openBook(books[idx].filepath.c_str())) {
+                        int vi = libraryScroll + row * cols + col;
+                        if (vi >= 0 && vi < numVisible && vi < libraryScroll + cardsPerPage) {
+                            int bi = filteredIndices[vi];
+                            Serial.printf("Opening book: %s\n", books[bi].filepath.c_str());
+                            if (reader.openBook(books[bi].filepath.c_str())) {
                                 readerFastRefresh = false;
                                 readerPageTurnsSinceFull = 0;
                                 appState = STATE_READER;
@@ -1391,18 +1493,19 @@ static void handleLibraryTouch(int x, int y) {
             }
         }
 
-        // Paging: tap in the page-controls area (below posters, above footer)
-        int pageControlY = H - FOOTER_HEIGHT - FONT_H - 30;
-        if ((int)books.size() > cardsPerPage && y >= pageControlY && y <= H - FOOTER_HEIGHT) {
+        // Match centered pagination position from draw code
+        int itemsOnPage = min(numVisible - libraryScroll, cardsPerPage);
+        int rowsOnPage = (itemsOnPage + cols - 1) / cols;
+        int contentBottom = listStartY + (rowsOnPage > 0 ? (rowsOnPage - 1) * (posterH + 14) + posterH : 0);
+        int pageControlY = (contentBottom + (H - FOOTER_HEIGHT)) / 2 - FONT_H / 2;
+        if (numVisible > cardsPerPage && y >= pageControlY && y <= H - FOOTER_HEIGHT) {
             if (x < W / 3 && libraryScroll > 0) {
-                // Prev page
                 libraryScroll -= cardsPerPage;
                 if (libraryScroll < 0) libraryScroll = 0;
                 needsRedraw = true;
-            } else if (x > W * 2 / 3 && libraryScroll + cardsPerPage < (int)books.size()) {
-                // Next page
+            } else if (x > W * 2 / 3 && libraryScroll + cardsPerPage < numVisible) {
                 libraryScroll += cardsPerPage;
-                if (libraryScroll >= (int)books.size()) libraryScroll = max(0, (int)books.size() - cardsPerPage);
+                if (libraryScroll >= numVisible) libraryScroll = max(0, numVisible - cardsPerPage);
                 needsRedraw = true;
             }
         }
@@ -1410,29 +1513,30 @@ static void handleLibraryTouch(int x, int y) {
     }
 
     // Book selection (list view)
-    int maxVisible = (H - listStartY - FOOTER_HEIGHT - MARGIN_Y) / BOOK_ITEM_H;
+    int maxVis = (H - listStartY - FOOTER_HEIGHT - MARGIN_Y) / BOOK_ITEM_H;
 
-    // Paging controls area (below book list, above footer)
-    int pageControlY = H - FOOTER_HEIGHT - FONT_H - 30;
-    if ((int)books.size() > maxVisible && y >= pageControlY && y <= H - FOOTER_HEIGHT) {
+    // Match centered pagination position from draw code
+    int contentBottom = listStartY + min(numVisible - libraryScroll, maxVis) * BOOK_ITEM_H;
+    int pageControlY = (contentBottom + (H - FOOTER_HEIGHT)) / 2 - FONT_H / 2;
+    if (numVisible > maxVis && y >= pageControlY && y <= H - FOOTER_HEIGHT) {
         if (x < W / 3 && libraryScroll > 0) {
-            libraryScroll -= maxVisible;
+            libraryScroll -= maxVis;
             if (libraryScroll < 0) libraryScroll = 0;
             needsRedraw = true;
-        } else if (x > W * 2 / 3 && libraryScroll + maxVisible < (int)books.size()) {
-            libraryScroll += maxVisible;
-            if (libraryScroll >= (int)books.size()) libraryScroll = max(0, (int)books.size() - maxVisible);
+        } else if (x > W * 2 / 3 && libraryScroll + maxVis < numVisible) {
+            libraryScroll += maxVis;
+            if (libraryScroll >= numVisible) libraryScroll = max(0, numVisible - maxVis);
             needsRedraw = true;
         }
         return;
     }
 
     if (y > listStartY) {
-        int idx = libraryScroll + (y - listStartY) / BOOK_ITEM_H;
-
-        if (idx >= 0 && idx < (int)books.size() && idx < libraryScroll + maxVisible) {
-            Serial.printf("Opening book: %s\n", books[idx].filepath.c_str());
-            if (reader.openBook(books[idx].filepath.c_str())) {
+        int vi = libraryScroll + (y - listStartY) / BOOK_ITEM_H;
+        if (vi >= 0 && vi < numVisible && vi < libraryScroll + maxVis) {
+            int bi = filteredIndices[vi];
+            Serial.printf("Opening book: %s\n", books[bi].filepath.c_str());
+            if (reader.openBook(books[bi].filepath.c_str())) {
                 readerFastRefresh = false;
                 readerPageTurnsSinceFull = 0;
                 appState = STATE_READER;
@@ -1664,20 +1768,24 @@ static void handleSettingsTouch(int x, int y) {
     int row = (y - rowY) / SETTINGS_ROW_H;
     bool rightSide = (x > W / 2);
 
-    // Row 0 = Font Size, Row 1 = font preview (no action), rest shifted +1
-    if (row >= 0 && row < 12) {
+    // Row 0 = Font Size, Row 1 = Font Family, Row 2 = font preview (no action), rest shifted +2
+    if (row >= 0 && row < 13) {
         switch (row) {
-            case 0: // Font Size — also update display font for live preview
+            case 0: // Font Size — cycle through 7 levels
                 if (rightSide) {
-                    s.fontSize = (s.fontSize + 1) % 3;
+                    s.fontSizeLevel = (s.fontSizeLevel + 1) % NUM_FONT_SIZES;
                 } else {
-                    s.fontSize = (s.fontSize + 2) % 3;
+                    s.fontSizeLevel = (s.fontSizeLevel + NUM_FONT_SIZES - 1) % NUM_FONT_SIZES;
                 }
-                display_set_font_size(s.fontSize);
+                display_set_font(s.fontSizeLevel, s.serifFont);
                 break;
-            case 1: // Font preview row — no action
+            case 1: // Font Family — toggle serif/sans
+                s.serifFont = !s.serifFont;
+                display_set_font(s.fontSizeLevel, s.serifFont);
                 break;
-            case 2: { // Sleep Timeout
+            case 2: // Font preview row — no action
+                break;
+            case 3: { // Sleep Timeout
                 int idx = findSleepIdx();
                 if (rightSide) {
                     idx = (idx + 1) % NUM_SLEEP_OPTIONS;
@@ -1687,10 +1795,10 @@ static void handleSettingsTouch(int x, int y) {
                 s.sleepTimeoutMin = sleepOptions[idx];
                 break;
             }
-            case 3: // Sleep now
+            case 4: // Sleep now
                 enterDeepSleep();
                 return;
-            case 4: { // Cleanup Refresh cadence
+            case 5: { // Cleanup Refresh cadence
                 int idx = findRefreshIdx();
                 if (rightSide) {
                     idx = (idx + 1) % NUM_REFRESH_OPTIONS;
@@ -1700,31 +1808,31 @@ static void handleSettingsTouch(int x, int y) {
                 s.refreshEveryPages = refreshOptions[idx];
                 break;
             }
-            case 5: // Library View
+            case 6: // Library View
                 s.libraryViewMode = (s.libraryViewMode + 1) % 2;
                 if (s.libraryViewMode == 1) {
                     s.posterShowCovers = true;
                 }
                 cover_cache_clear();
                 break;
-            case 6: // WiFi Upload
+            case 7: // WiFi Upload
                 appState = STATE_WIFI;
                 wifi_upload_start();
                 needsRedraw = true;
                 return;
-            case 7: // Poster Covers toggle
+            case 8: // Poster Covers toggle
                 s.posterShowCovers = !s.posterShowCovers;
                 cover_cache_clear();
                 break;
-            case 8: // WiFi SSID (display only)
+            case 9: // WiFi SSID (display only)
                 break;
-            case 9: // Page Numbers toggle
+            case 10: // Page Numbers toggle
                 s.showPageNumbers = !s.showPageNumbers;
                 break;
-            case 10: // Battery Display toggle
+            case 11: // Battery Display toggle
                 s.showBattery = !s.showBattery;
                 break;
-            case 11: // Firmware Update — enter OTA check screen
+            case 12: // Firmware Update — enter OTA check screen
                 otaPhase = OTA_CHECKING;
                 otaUpdateAvailable = false;
                 otaLatestVersion = "";
@@ -1736,9 +1844,11 @@ static void handleSettingsTouch(int x, int y) {
         return;
     }
 
-    // Reset Defaults row (below the 12 settings rows including preview)
-    int resetY = rowY + SETTINGS_ROW_H * 12 + 20;
-    if (y >= resetY && y < resetY + FONT_H + 10) {
+    // Reset Defaults — centered in gap between last settings row and footer
+    int gapTop = rowY + SETTINGS_ROW_H * 13;
+    int footerTop = H - FOOTER_HEIGHT;
+    int resetY = gapTop;  // entire gap area is the touch target
+    if (y >= resetY && y < footerTop) {
         settings_set_default();
         needsRedraw = true;
     }
@@ -1748,6 +1858,7 @@ static void handleWifiTouch(int x, int y) {
     (void)x; (void)y;
     wifi_upload_stop();
     books = library_scan();
+    updateFilteredIndices();
     cover_cache_clear();
     appState = STATE_LIBRARY;
     needsRedraw = true;
@@ -1783,7 +1894,8 @@ static void enterDeepSleep(bool triggeredByButton) {
             resumeState = (int)STATE_READER;
         }
         // Transient states resume to library
-        if (appState == STATE_WIFI || appState == STATE_OTA_CHECK || appState == STATE_SETTINGS) {
+        if (appState == STATE_WIFI || appState == STATE_OTA_CHECK || appState == STATE_SETTINGS ||
+            appState == STATE_OPDS_BROWSE || appState == STATE_OPDS_DOWNLOAD) {
             resumeState = (int)STATE_LIBRARY;
         }
         prefs.putInt("sleepState", resumeState);
@@ -1884,8 +1996,9 @@ void setup() {
     }
 
     settings_init();
-    display_set_font_size(settings_get().fontSize);
+    display_set_font(settings_get().fontSizeLevel, settings_get().serifFont);
     books = library_scan();
+    updateFilteredIndices();
     cover_cache_clear();
     wifi_upload_init();
     wifi_upload_set_reader(&reader);
@@ -1987,10 +2100,11 @@ static void buttonPageForward() {
             if (reader.didChapterChange()) readerChapterJump = true;
             needsRedraw = true;
         }
-    } else if (appState == STATE_LIBRARY && !books.empty()) {
+    } else if (appState == STATE_LIBRARY && !filteredIndices.empty()) {
         const Settings& s = settings_get();
-        int listStartY = HEADER_HEIGHT + MARGIN_Y;
-        if (library_find_current_book(books) >= 0) listStartY += FONT_H + 20;
+        int numVis = (int)filteredIndices.size();
+        int listStartY = HEADER_HEIGHT + FILTER_TAB_H + MARGIN_Y;
+        if (library_find_current_book(books) >= 0 && libraryFilter == FILTER_ALL) listStartY += FONT_H + 20;
         int itemsPerPage;
         if (s.libraryViewMode == 1) {
             int posterH = 310;
@@ -1999,7 +2113,7 @@ static void buttonPageForward() {
         } else {
             itemsPerPage = (H - listStartY - FOOTER_HEIGHT - MARGIN_Y) / BOOK_ITEM_H;
         }
-        if (libraryScroll + itemsPerPage < (int)books.size()) {
+        if (libraryScroll + itemsPerPage < numVis) {
             libraryScroll += itemsPerPage;
             needsRedraw = true;
         }
@@ -2014,10 +2128,10 @@ static void buttonPageBackward() {
             if (reader.didChapterChange()) readerChapterJump = true;
             needsRedraw = true;
         }
-    } else if (appState == STATE_LIBRARY && !books.empty()) {
+    } else if (appState == STATE_LIBRARY && !filteredIndices.empty()) {
         const Settings& s = settings_get();
-        int listStartY = HEADER_HEIGHT + MARGIN_Y;
-        if (library_find_current_book(books) >= 0) listStartY += FONT_H + 20;
+        int listStartY = HEADER_HEIGHT + FILTER_TAB_H + MARGIN_Y;
+        if (library_find_current_book(books) >= 0 && libraryFilter == FILTER_ALL) listStartY += FONT_H + 20;
         int itemsPerPage;
         if (s.libraryViewMode == 1) {
             int posterH = 310;
@@ -2122,32 +2236,27 @@ void loop() {
                         }
                         swipeHandled = true;
                     }
-                } else if (appState == STATE_LIBRARY && !books.empty()) {
+                } else if (appState == STATE_LIBRARY && !filteredIndices.empty()) {
                     // Library swipe: compute items per page for current view mode
                     const Settings& s = settings_get();
+                    int numVis = (int)filteredIndices.size();
                     int itemsPerPage;
+                    int listStartY = HEADER_HEIGHT + FILTER_TAB_H + MARGIN_Y;
+                    if (library_find_current_book(books) >= 0 && libraryFilter == FILTER_ALL) listStartY += FONT_H + 20;
                     if (s.libraryViewMode == 1) {
-                        // Poster view
-                        int listStartY = HEADER_HEIGHT + MARGIN_Y;
-                        if (library_find_current_book(books) >= 0) listStartY += FONT_H + 20;
                         int posterH = 310;
                         int rowsVisible = max(1, (H - listStartY - FOOTER_HEIGHT - MARGIN_Y) / (posterH + 14));
                         itemsPerPage = rowsVisible * 2;
                     } else {
-                        // List view
-                        int listStartY = HEADER_HEIGHT + MARGIN_Y;
-                        if (library_find_current_book(books) >= 0) listStartY += FONT_H + 20;
                         itemsPerPage = (H - listStartY - FOOTER_HEIGHT - MARGIN_Y) / BOOK_ITEM_H;
                     }
                     if (dx < 0) {
-                        // Swipe left → next page of books
-                        if (libraryScroll + itemsPerPage < (int)books.size()) {
+                        if (libraryScroll + itemsPerPage < numVis) {
                             libraryScroll += itemsPerPage;
                             needsRedraw = true;
                         }
                         swipeHandled = true;
                     } else {
-                        // Swipe right → prev page of books
                         if (libraryScroll > 0) {
                             libraryScroll -= itemsPerPage;
                             if (libraryScroll < 0) libraryScroll = 0;
@@ -2169,6 +2278,22 @@ void loop() {
                     case STATE_SETTINGS:  handleSettingsTouch(tx, ty);          break;
                     case STATE_OTA_CHECK: handleOtaTouch(tx, ty);              break;
                     case STATE_WIFI:      handleWifiTouch(tx, ty);              break;
+                    case STATE_OPDS_BROWSE:
+                    case STATE_OPDS_DOWNLOAD: {
+                        opds_store_handle_touch(tx, ty);
+                        OpdsStoreState& os = opds_store_state();
+                        if (os.statusMsg == "__BACK__") {
+                            os.statusMsg = "";
+                            if (opds_store_needs_library_refresh()) {
+                                books = library_scan();
+                                cover_cache_clear();
+                                opds_store_clear_refresh_flag();
+                            }
+                            appState = STATE_LIBRARY;
+                        }
+                        needsRedraw = true;
+                        break;
+                    }
                     default: break;
                 }
             }
@@ -2187,6 +2312,11 @@ void loop() {
             case STATE_SETTINGS:  drawSettingsScreen();  break;
             case STATE_OTA_CHECK: drawOtaScreen();       break;
             case STATE_WIFI:      drawWifiScreen();      break;
+            case STATE_OPDS_BROWSE:
+            case STATE_OPDS_DOWNLOAD:
+                opds_store_draw();
+                needsRedraw = false;
+                break;
             default: break;
         }
     }
