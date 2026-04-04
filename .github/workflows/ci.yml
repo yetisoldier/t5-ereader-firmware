@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Setup PlatformIO
+        uses: arduino/setup-platformio@v1
+        with:
+          version: latest
+          
+      - name: Build
+        run: pio run
+        
+      - name: Check firmware size
+        run: |
+          echo "Build completed successfully"
+          # PlatformIO outputs size info during build

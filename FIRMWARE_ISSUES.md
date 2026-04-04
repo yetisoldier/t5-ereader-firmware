@@ -1,23 +1,15 @@
 # T5 E-Reader Firmware — Issue Log & Handoff
 
-**Date:** 2026-03-31
+**Date:** 2026-04-04
 **Project:** `/home/yetisoldier/.openclaw/workspace/t5-ereader-firmware`
 **Hardware:** LilyGo T5 4.7" V2.4 (ESP32-S3-WROOM-1-N16R8, 16MB flash, 8MB OPI PSRAM)
 **Platform:** PlatformIO, espressif32@6.4.0, Arduino framework
+**Version:** v0.3.1
 
 ---
 
-## ✅ RESOLVED — Build now compiles cleanly
+## Build Status
 
-### Issue 1 — Font struct mismatch (FIXED)
-**Problem:** Code used `xAdvance` / `yAdvance` (Adafruit GFX field names), but LilyGo-EPD47 uses `advance_x` / `advance_y` and its own `get_glyph()` function.
-**Fix:** `src/display.cpp` — replaced direct glyph array access with `get_glyph(font, codepoint, &glyph)` and `glyph->advance_x` / `font->advance_y`.
-
-### Issue 2 — miniz include path (FIXED)
-**Problem:** `src/epub.cpp` tried to include `esp32s3/rom/miniz.h` (ROM miniz), which is not on the compiler's default include path.
-**Fix:** Downloaded miniz 2.1.0 from richgel999/miniz and added `src/miniz.h` + `src/miniz.c` directly to the project.
-
-### Build output (clean)
 ```
 RAM:   [=         ]  14.3% (used 46700 bytes from 327680 bytes)
 Flash: [=         ]  12.0% (used 1003437 bytes from 8388608 bytes)
@@ -25,89 +17,74 @@ Flash: [=         ]  12.0% (used 1003437 bytes from 8388608 bytes)
 
 ---
 
-## ✅ RESOLVED — Touch not responding (FIXED)
+## Resolved Issues
 
-### Root cause: GT911 not waking / initializing
-**Fix applied:**
-- `config.h`: Changed `TOUCH_INT_PIN` from `-1` to `47`
-- `touch.cpp`: Added INT pin wake-up, I2C address scanning, coordinate transforms
-- Verified working: touch events detected, books selectable
+### Font struct mismatch (FIXED)
+Code used `xAdvance` / `yAdvance` (Adafruit GFX field names), but LilyGo-EPD47 uses `advance_x` / `advance_y`. Fixed in `src/display.cpp`.
 
----
+### miniz include path (FIXED)
+Downloaded miniz 2.1.0 and added `src/miniz.h` + `src/miniz.c` directly to project.
 
-## ✅ RESOLVED — EPUB files fail to open (ZIP: cannot open)
+### Touch not responding (FIXED)
+GT911 INT pin wake-up added. `config.h`: `TOUCH_INT_PIN` changed to `47`. Touch events working.
 
-### Root cause: VFS mount path mismatch
-**Problem:** `ZipReader::open()` uses POSIX `fopen()` with SD-relative paths like `/books/mybook.epub`. On ESP32 Arduino, the SD card is mounted at `/sd` in the VFS (Virtual File System). Arduino's `SD.open()` handles this prefix transparently, but raw `fopen()` does not — it needs `/sd/books/mybook.epub`.
+### EPUB files fail to open (FIXED)
+`ZipReader::open()` now prepends `/sd` to paths for VFS compatibility.
 
-**Fix applied (`src/epub.cpp`):**
-- `ZipReader::open()` now prepends `/sd` to the path if it doesn't already start with `/sd`
-- Added diagnostic logging showing both the caller path and the VFS path
-- Added `errno` reporting for any remaining open failures
+### Upload permission (FIXED)
+User in `dialout` group. Upload via `pio run -t upload --upload-port /dev/ttyACM0`.
 
-**Verified working (serial output):**
-```
-ZIP: opening /books/...Odd Thomas....epub (vfs: /sd/books/...Odd Thomas....epub)
-ZIP: found 471 entries
-EPUB: title = The Odd Thomas Series 7-Book Bundle
-EPUB: 408 chapters in spine
+### Grayscale inversion (FIXED v0.3.0)
+Cover and inline images now render with correct polarity (0=black, 15=white).
 
-ZIP: opening /books/...Ender's Game....epub (vfs: /sd/books/...Ender's Game....epub)
-ZIP: found 29 entries
-EPUB: title = Enders Game 1 - Ender's Game
-EPUB: 18 chapters in spine
+### Poster placeholder detection (FIXED v0.3.0)
+Multi-layer statistical heuristic detects broken/placeholder images; fallback to covers-off card layout.
 
-Library: 2 books found
-```
+### Startup splash version (FIXED v0.3.0)
+Version text now rendered dynamically; splash bitmap is static artwork only.
 
 ---
 
-## ✅ RESOLVED — Upload permission (dialout group)
+## Current Features (v0.3.1)
 
-User `yetisoldier` is now in the `dialout` group. Upload works via:
-```bash
-pio run -t upload --upload-port /dev/ttyACM0
-```
+### Reading
+- 7 font sizes: XS, S, M, ML, L, XL, XXL
+- Serif toggle: Fira Sans or Noto Serif
+- TOC navigation (chapter picker overlay)
+- Bookmarks with quick jump
+- Progress persistence per-book
 
----
+### Library
+- Filter tabs: ALL / NEW / READING / DONE
+- "Continue Reading" banner for in-progress books
+- Progress percentage displayed
 
-## Ghost OS-Style UI Enhancements (added 2026-03-31)
+### OPDS / Gutenberg
+- Browse and download from Calibre servers or Project Gutenberg
+- Genre browser for Gutenberg (no keyboard required)
+- Download progress indicator
 
-### "Continue Reading" banner
-- Library screen shows a tappable "Continue Reading: [title]" banner at the top when there's a book with saved progress
-- Tapping the banner opens that book directly to the last-read position
-
-### Reading progress in library
-- Each book in the library list shows a progress percentage on the right (based on chapter position)
-- Progress is loaded from the per-book `.json` save files in `/books/.progress/`
-
-### Reader header
-- Reader screen now shows the book title (gray, subtle) in a mini header bar
-- Battery percentage displayed on the right
-- Thin separator line below for clean visual hierarchy
-
-### Reader footer improvements
-- Overall reading progress percentage (based on chapters) shown centered in the footer
-- Chapter counter on the left, page counter on the right, progress % in the middle
+### System
+- OTA updates from GitHub Releases (Settings → Check for Update)
+- WiFi upload server with QR code for easy access
+- Sleep image rotation from `/sleep` folder
+- Physical button: single=next, double=prev, long=sleep
 
 ---
 
-## Remaining Limitations
-
-### No font size control
-The firmware uses a single fixed font (FiraSans from LilyGo-EPD47). Font size adjustment would require loading multiple font sizes or implementing a scaling approach.
+## Known Limitations
 
 ### Single-level progress tracking
-Progress is saved per-book as chapter + page. There's no timestamp on progress files, so "Continue Reading" picks the first book with progress rather than the most recently read.
+Progress is saved per-book as chapter + page. No timestamp, so "Continue Reading" picks the first book with progress rather than the most recently read.
 
 ### Long filenames
-Books with very long paths/filenames work but get truncated in the UI. The full path is preserved internally.
+Books with very long paths/filenames work but get truncated in the UI. Full path preserved internally.
 
-### No table of contents navigation
-The reader supports linear chapter-by-chapter reading. There's no chapter picker / TOC view yet.
+### No inline image rendering
+EPUB images are stripped during HTML→text conversion. Only text content is displayed. (Covers and sleep images render correctly.)
 
-### No image rendering
-EPUB images are stripped during HTML→text conversion. Only text content is displayed.
+### No regression tests
+No automated CI for push/PR. Broken commits can land on `main` undetected.
 
 ---
 
@@ -115,18 +92,56 @@ EPUB images are stripped during HTML→text conversion. Only text content is dis
 
 ```
 t5-ereader-firmware/
-├── platformio.ini          (espressif32@6.4.0, arduino, 16MB flash)
-├── partitions.csv          (custom partition table)
+├── platformio.ini           (espressif32@6.4.0, arduino, 16MB flash)
+├── partitions.csv           (custom partition table)
+├── CHANGELOG.md             (version history)
+├── README.md                 (usage, gestures, screenshots)
+├── docs/
+│   └── screenshots/          (device photos for README)
+├── tools/
+│   └── generate_gnome_splash.py  (splash bitmap generator)
+├── include/
+│   ├── config.h.example      (config template)
+│   ├── ota_update.h
+│   └── gnome_splash.h        (generated splash bitmap)
 ├── src/
-│   ├── main.cpp            (setup/loop, state machine, UI drawing)
-│   ├── config.h            (pin definitions, WiFi creds, layout constants)
-│   ├── display.cpp/.h      (EPD wrapper — portrait framebuffer, rotation)
-│   ├── epub.cpp/.h         (ZIP/EPUB parser — VFS path fix applied)
-│   ├── miniz.h/.c          (miniz 2.1.0 — bundled for inflate/deflate)
-│   ├── library.cpp/.h      (SD card book scanning + progress loading)
-│   ├── reader.cpp/.h       (page rendering, text wrapping, progress save/load)
-│   ├── touch.cpp/.h        (GT911 touch input with coordinate transforms)
-│   ├── battery.cpp/.h      (ADC voltage monitoring)
-│   └── wifi_upload.cpp/.h  (WiFi OTA upload server)
-└── FIRMWARE_ISSUES.md      (this file)
+│   ├── main.cpp              (setup/loop, state machine, UI dispatch)
+│   ├── config.h              (pin definitions, WiFi, layout constants)
+│   ├── display.cpp/.h        (EPD wrapper — portrait, rotation)
+│   ├── epub.cpp/.h           (ZIP/EPUB parser)
+│   ├── miniz.h/.c            (miniz 2.1.0 bundled)
+│   ├── library.cpp/.h        (SD scanning, progress loading)
+│   ├── reader.cpp/.h         (page rendering, progress)
+│   ├── settings.cpp/.h        (settings persistence)
+│   ├── touch.cpp/.h           (GT911 input, transforms)
+│   ├── battery.cpp/.h         (ADC voltage)
+│   ├── sleep_image.cpp/.h     (sleep screen rendering)
+│   ├── cover_renderer.cpp/.h  (book covers)
+│   ├── inline_image.cpp/.h    (EPUB inline images)
+│   ├── image_tone.h           (gamma/brightness correction)
+│   ├── wifi_upload.cpp/.h     (WiFi upload server)
+│   ├── ota_update.cpp/.h      (OTA update flow)
+│   ├── opds_store.cpp/.h      (OPDS catalog browsing)
+│   ├── opds_client.h           (OPDS HTTP client)
+│   └── storage_utils.h         (SD card helpers)
+└── FIRMWARE_ISSUES.md        (this file)
 ```
+
+---
+
+## Development Notes
+
+### Flashing
+```bash
+pio run -t upload --upload-port /dev/ttyACM0
+```
+
+### Serial Monitor
+```bash
+pio device monitor -p /dev/ttyACM0 -b 115200
+```
+
+### OTA Updates
+1. Tag a release: `git tag v0.x.x && git push --tags`
+2. GitHub Actions builds `firmware.bin`
+3. Device: Settings → Check for Update
