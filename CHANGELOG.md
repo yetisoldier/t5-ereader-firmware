@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.4.0 — 2026-04-04
+
+### Added
+- **GNOME boot splash:** New splash screen artwork displayed on cold start
+- **Line spacing settings:** Choose from Compact, Normal, Relaxed, Spacious, or Extra line heights in Settings
+- **Library cover pre-caching:** Poster view now warms a 16-entry cover cache for smoother scrolling
+- **Random sleep images:** Sleep screen rotates through images from `/sleep` directory with fallback to built-in
+
+### Changed
+- **UI refactoring:** Extracted `ui_library.cpp`, `ui_settings.cpp`, and `state.h` from main.cpp for cleaner architecture
+- **Font sizes reduced:** Simplified from 7 options (XS–XXL) to 5 options (XS, S, M, M-L, L)
+- **Settings split into two pages:** Navigation and display settings now organized across paginated screens
+- **Settings refresh optimization:** Settings screen uses faster `display_update_medium()` instead of full refresh
+- **Settings tab outline fix:** Tabs now use outline-only rendering instead of filled boxes
+
+### Fixed
+- **Critical sleep/power freeze:** Fixed device freeze when USB disconnected — all `Serial.print`/`flush` calls in sleep path now guarded with `if (Serial)` to prevent blocking when USB is not attached
+- **Crash guard on wake:** Reopening books after wake now has crash protection to prevent boot loops from corrupted state
+- **Display hold during sleep:** `display_update_sleep()` now preserves panel latch state correctly during sleep transitions
+
+---
+
 ## v0.3.1 — 2026-04-03
 
 ### Added

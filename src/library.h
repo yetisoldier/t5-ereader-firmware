@@ -5,6 +5,7 @@
 
 struct BookInfo {
     String title;
+    String author;
     String filepath;
     int progressChapter = 0;   // last-read chapter index
     int progressPage = 0;      // last-read page index
@@ -26,6 +27,7 @@ enum LibraryFilter {
 
 bool library_init();
 std::vector<BookInfo> library_scan();
+void library_sort(std::vector<BookInfo>& books);
 std::vector<int> library_filter(const std::vector<BookInfo>& books,
                                  LibraryFilter filter);
 

@@ -1,10 +1,12 @@
 #include "library.h"
 #include "config.h"
 #include "epub.h"
+#include "settings.h"
 #include "storage_utils.h"
 #include <SD.h>
 #include <SPI.h>
 #include <ArduinoJson.h>
+#include <algorithm>
 
 static bool _mounted = false;
 static const char* CACHE_PATH = "/books/.library_cache.json";
@@ -56,6 +58,7 @@ struct CacheEntry {
     String path;
     size_t size;
     String title;
+    String author;
     int chapters;
     bool hasCover;
     String coverPath;
@@ -77,6 +80,7 @@ static std::vector<CacheEntry> loadCache() {
         e.path     = obj["path"].as<String>();
         e.size     = obj["size"] | 0;
         e.title    = obj["title"].as<String>();
+        e.author   = obj["author"].as<String>();
         e.chapters = obj["chapters"] | 0;
         e.hasCover = obj["hasCover"] | false;
         e.coverPath = obj["coverPath"].as<String>();
@@ -94,6 +98,7 @@ static void saveCache(const std::vector<CacheEntry>& cache) {
         obj["path"]     = e.path;
         obj["size"]     = e.size;
         obj["title"]    = e.title;
+        obj["author"]   = e.author;
         obj["chapters"] = e.chapters;
         obj["hasCover"] = e.hasCover;
         obj["coverPath"] = e.coverPath;
@@ -138,6 +143,7 @@ static void scanDir(File& dir, const char* path,
                 const CacheEntry* cached = findCacheEntry(cache, book.filepath, book.fileSize);
                 if (cached) {
                     book.title = cached->title;
+                    book.author = cached->author;
                     book.totalChapters = cached->chapters;
                     book.hasCover = cached->hasCover;
                     book.coverPath = cached->coverPath;
@@ -147,6 +153,7 @@ static void scanDir(File& dir, const char* path,
                     EpubParser parser;
                     if (parser.open(book.filepath.c_str())) {
                         book.title = parser.getTitle();
+                        book.author = parser.getAuthor();
                         book.totalChapters = parser.getChapterCount();
                         book.hasCover = parser.hasCoverImage();
                         book.coverPath = parser.getCoverImagePath();
@@ -164,6 +171,7 @@ static void scanDir(File& dir, const char* path,
                 ce.path = book.filepath;
                 ce.size = book.fileSize;
                 ce.title = book.title;
+                ce.author = book.author;
                 ce.chapters = book.totalChapters;
                 ce.hasCover = book.hasCover;
                 ce.coverPath = book.coverPath;
@@ -215,6 +223,7 @@ std::vector<BookInfo> library_scan() {
                         const CacheEntry* cached = findCacheEntry(cache, book.filepath, book.fileSize);
                         if (cached) {
                             book.title = cached->title;
+                            book.author = cached->author;
                             book.totalChapters = cached->chapters;
                             book.hasCover = cached->hasCover;
                             book.coverPath = cached->coverPath;
@@ -222,6 +231,7 @@ std::vector<BookInfo> library_scan() {
                             EpubParser parser;
                             if (parser.open(book.filepath.c_str())) {
                                 book.title = parser.getTitle();
+                                book.author = parser.getAuthor();
                                 book.totalChapters = parser.getChapterCount();
                                 book.hasCover = parser.hasCoverImage();
                                 book.coverPath = parser.getCoverImagePath();
@@ -237,6 +247,7 @@ std::vector<BookInfo> library_scan() {
                         ce.path = book.filepath;
                         ce.size = book.fileSize;
                         ce.title = book.title;
+                        ce.author = book.author;
                         ce.chapters = book.totalChapters;
                         ce.hasCover = book.hasCover;
                         ce.coverPath = book.coverPath;
@@ -277,8 +288,39 @@ std::vector<BookInfo> library_scan() {
     }
 
     unsigned long elapsed = millis() - startMs;
+    library_sort(books);
     Serial.printf("Library: %d books found in %lums\n", books.size(), elapsed);
     return books;
+}
+
+static String normalized_sort_key(const String& input) {
+    String key = input;
+    key.trim();
+    key.toLowerCase();
+    return key;
+}
+
+void library_sort(std::vector<BookInfo>& books) {
+    const uint8_t sortOrder = settings_get().librarySortOrder;
+    std::stable_sort(books.begin(), books.end(), [sortOrder](const BookInfo& a, const BookInfo& b) {
+        switch (sortOrder) {
+            case 1: {
+                String aa = normalized_sort_key(a.author.length() > 0 ? a.author : a.title);
+                String bb = normalized_sort_key(b.author.length() > 0 ? b.author : b.title);
+                if (aa == bb) return normalized_sort_key(a.title) < normalized_sort_key(b.title);
+                return aa < bb;
+            }
+            case 2:
+                if (a.lastReadOrder != b.lastReadOrder) return a.lastReadOrder > b.lastReadOrder;
+                return normalized_sort_key(a.title) < normalized_sort_key(b.title);
+            case 3:
+                if (a.fileSize != b.fileSize) return a.fileSize > b.fileSize;
+                return normalized_sort_key(a.title) < normalized_sort_key(b.title);
+            case 0:
+            default:
+                return normalized_sort_key(a.title) < normalized_sort_key(b.title);
+        }
+    });
 }
 
 std::vector<int> library_filter(const std::vector<BookInfo>& books,

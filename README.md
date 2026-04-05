@@ -8,7 +8,7 @@ EPUB reader firmware for the LilyGo T5 4.7 inch ESP32-S3 e-paper board.
 
 ## Status
 
-Current firmware version: **v0.3.1**
+Current firmware version: **v0.4.0**
 
 This branch is tuned for the real device workflow now in code:
 - portrait UI on the 960x540 panel
@@ -33,8 +33,9 @@ This branch is tuned for the real device workflow now in code:
 
 ### Reading
 - EPUB parsing with chapter navigation and pagination
-- Seven font size levels: XS, S, M, ML, L, XL, XXL
+- Five font size levels: XS, S, M, M-L, L
 - Serif (Noto Serif) and sans-serif (Fira Sans) font toggle — configurable in Settings
+- Line spacing options: Compact, Normal, Relaxed, Spacious, Extra
 - Inline image rendering from EPUB content
 - Fast partial refresh for most page turns with stronger cleanup refreshes on cadence
 - Reader progress bar, chapter indicator, page indicator, and optional battery display

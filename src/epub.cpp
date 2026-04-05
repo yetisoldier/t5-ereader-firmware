@@ -17,6 +17,7 @@
 static uint16_t read16(const uint8_t* p) { return p[0] | (p[1] << 8); }
 static uint32_t read32(const uint8_t* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24); }
 static String decodeEntities(const String& input);
+static String stripTagsAndTrim(const String& html);
 
 bool ZipReader::open(const char* path) {
     close();
@@ -236,6 +237,7 @@ bool EpubParser::open(const char* filepath) {
 void EpubParser::close() {
     _zip.close();
     _title = "";
+    _author = "";
     _basePath = "";
     _spine.clear();
     _manifest.clear();
@@ -291,6 +293,12 @@ bool EpubParser::parseContentOpf(const char* opfPath) {
     if (_title.length() == 0) {
         _title = "Untitled";
     }
+
+    _author = xmlText(xml, "dc:creator");
+    if (_author.length() == 0) {
+        _author = xmlText(xml, "creator");
+    }
+    _author = stripTagsAndTrim(_author);
 
     Serial.printf("EPUB: title = %s\n", _title.c_str());
 

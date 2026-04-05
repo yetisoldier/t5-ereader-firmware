@@ -11,12 +11,30 @@
 static Preferences _prefs;
 
 static const int MAX_WRAP_TEXT_CHARS = 120000;
+
+static int countWords(const String& text) {
+    int words = 0;
+    bool inWord = false;
+    for (int i = 0; i < (int)text.length(); i++) {
+        char c = text[i];
+        bool isWordChar = isalnum((unsigned char)c) || c == '\'';
+        if (isWordChar && !inWord) {
+            words++;
+            inWord = true;
+        } else if (!isWordChar) {
+            inWord = false;
+        }
+    }
+    return words;
+}
+
 bool BookReader::openBook(const char* filepath) {
     closeBook();
     if (!_parser.open(filepath)) return false;
 
     _filepath = String(filepath);
     _title = _parser.getTitle();
+    _author = _parser.getAuthor();
 
     recalculateLayout();
     _pageTurnsSinceSave = 0;
@@ -43,11 +61,15 @@ void BookReader::recalculateLayout() {
     if (level >= FONT_SIZE_LEVEL_COUNT) level = FONT_SIZE_LEVEL_COUNT - 1;
     display_set_font(level, s.serifFont);
 
-    // Margins and line spacing scale with font size level
-    int lineSpacing = FONT_LINE_SPACINGS[level];
+    // Margins follow font size, but leading is user-adjustable.
+    uint8_t spacingLevel = s.lineSpacingLevel;
+    if (spacingLevel >= LINE_SPACING_LEVEL_COUNT) spacingLevel = 2;
     int marginX = FONT_MARGIN_X_VALUES[level];
 
     int bodyFontH = display_font_height();
+    int lineHeight = (bodyFontH * LINE_SPACING_PCT[spacingLevel] + 99) / 100;
+    if (lineHeight < bodyFontH) lineHeight = bodyFontH;
+    int lineSpacing = lineHeight - bodyFontH;
     // The footer already reserves its own area, so only a tiny extra buffer is
     // needed above it now that draw-time spacing matches pagination.
     int usableHeight = display_height() - HEADER_HEIGHT - FOOTER_HEIGHT - MARGIN_Y * 2 - 4;
@@ -67,6 +89,7 @@ void BookReader::closeBook() {
     saveProgress();
     _parser.close();
     _title = "";
+    _author = "";
     _filepath = "";
     _currentChapter = 0;
     _currentPage = 0;
@@ -76,11 +99,16 @@ void BookReader::closeBook() {
     _pages.clear();
     _currentPageLines.clear();
     _bookmarks.clear();
+    _history.clear();
     _lineCachePath = "";
     _totalReadingTimeSec = 0;
     _totalPagesRead = 0;
     _sessionStartMs = 0;
     _lastTimeUpdateMs = 0;
+    _pageShownAtMs = 0;
+    _recentPageTimesMs.clear();
+    _avgPageTimeMs = 0;
+    _currentChapterWordCount = 0;
 }
 
 void BookReader::loadChapter(int chapter) {
@@ -105,6 +133,8 @@ void BookReader::loadChapter(int chapter) {
         text = "[Could not load chapter text]\n\nThe chapter may be too large.";
     }
 
+    _currentChapterWordCount = countWords(text);
+
     wrapTextToFile(text);
     text = String();  // free source text
 
@@ -116,6 +146,50 @@ void BookReader::loadChapter(int chapter) {
     if (_totalPages == 0) _totalPages = 1;
     if (_currentPage >= _totalPages) _currentPage = 0;
     updatePageLines();
+    notePageShown();
+}
+
+void BookReader::recordPageTurnTime() {
+    unsigned long now = millis();
+    if (_pageShownAtMs == 0 || now <= _pageShownAtMs) return;
+
+    uint32_t elapsedMs = now - _pageShownAtMs;
+    if (elapsedMs < 1000UL) elapsedMs = 1000UL;
+    if (elapsedMs > 15UL * 60UL * 1000UL) {
+        _pageShownAtMs = now;
+        return;
+    }
+
+    _recentPageTimesMs.push_back(elapsedMs);
+    if (_recentPageTimesMs.size() > 10) {
+        _recentPageTimesMs.erase(_recentPageTimesMs.begin());
+    }
+
+    uint64_t totalMs = 0;
+    for (uint32_t sample : _recentPageTimesMs) totalMs += sample;
+    if (!_recentPageTimesMs.empty()) {
+        _avgPageTimeMs = (uint32_t)(totalMs / _recentPageTimesMs.size());
+    }
+    _pageShownAtMs = now;
+}
+
+void BookReader::notePageShown() {
+    _pageShownAtMs = millis();
+}
+
+void BookReader::pushHistoryPoint() {
+    if (_title.length() == 0) return;
+    ReaderLocation loc;
+    loc.chapter = _currentChapter;
+    loc.page = _currentPage;
+    if (!_history.empty()) {
+        const ReaderLocation& last = _history.back();
+        if (last.chapter == loc.chapter && last.page == loc.page) return;
+    }
+    _history.push_back(loc);
+    if (_history.size() > 10) {
+        _history.erase(_history.begin());
+    }
 }
 
 void BookReader::updatePageLines() {
@@ -331,6 +405,7 @@ void BookReader::wrapTextToFile(const String& text) {
 }
 
 bool BookReader::nextPage() {
+    recordPageTurnTime();
     bool chapterChange = false;
     if (_currentPage + 1 < _totalPages) {
         _currentPage++;
@@ -347,6 +422,7 @@ bool BookReader::nextPage() {
     _totalPagesRead++;
     _chapterChanged = chapterChange;
     updatePageLines();
+    notePageShown();
     if (++_pageTurnsSinceSave >= SAVE_EVERY_N_TURNS) {
         updateReadingTime();
         saveProgress();
@@ -356,6 +432,7 @@ bool BookReader::nextPage() {
 }
 
 bool BookReader::prevPage() {
+    recordPageTurnTime();
     bool chapterChange = false;
     if (_currentPage > 0) {
         _currentPage--;
@@ -372,6 +449,7 @@ bool BookReader::prevPage() {
     _totalPagesRead++;
     _chapterChanged = chapterChange;
     updatePageLines();
+    notePageShown();
     if (++_pageTurnsSinceSave >= SAVE_EVERY_N_TURNS) {
         updateReadingTime();
         saveProgress();
@@ -391,8 +469,10 @@ void BookReader::updateReadingTime() {
     _lastTimeUpdateMs = now;
 }
 
-void BookReader::jumpToChapter(int chapter) {
+void BookReader::jumpToChapter(int chapter, bool rememberHistory) {
     if (chapter < 0 || chapter >= _parser.getChapterCount()) return;
+    if (rememberHistory) pushHistoryPoint();
+    recordPageTurnTime();
     _currentPage = 0;
     _currentPageLines.clear();
     loadChapter(chapter);
@@ -403,6 +483,42 @@ void BookReader::restorePage(int page) {
     if (page >= _totalPages) page = _totalPages - 1;
     _currentPage = page;
     updatePageLines();
+    notePageShown();
+}
+
+void BookReader::restoreLocation(int chapter, int page) {
+    recordPageTurnTime();
+    if (chapter < 0) chapter = 0;
+    if (chapter >= _parser.getChapterCount()) chapter = _parser.getChapterCount() - 1;
+    _currentPage = 0;
+    loadChapter(chapter);
+    restorePage(page);
+}
+
+bool BookReader::jumpToBookProgressPercent(int percent, bool rememberHistory) {
+    if (_parser.getChapterCount() <= 0) return false;
+    if (percent < 0) percent = 0;
+    if (percent > 100) percent = 100;
+    if (rememberHistory) pushHistoryPoint();
+
+    int chapterCount = _parser.getChapterCount();
+    int targetChapter = (percent >= 100) ? (chapterCount - 1) : ((percent * chapterCount) / 100);
+    if (targetChapter >= chapterCount) targetChapter = chapterCount - 1;
+    int withinPct = (percent >= 100) ? 100 : ((percent * chapterCount) % 100);
+
+    restoreLocation(targetChapter, 0);
+    int targetPage = (_totalPages > 1) ? ((withinPct * (_totalPages - 1)) / 100) : 0;
+    restorePage(targetPage);
+    return true;
+}
+
+bool BookReader::jumpToApproxBookPage(int page, bool rememberHistory) {
+    int totalApproxPages = getApproxBookPageCount();
+    if (totalApproxPages <= 0) return false;
+    if (page < 1) page = 1;
+    if (page > totalApproxPages) page = totalApproxPages;
+    int percent = (page - 1) * 100 / max(1, totalApproxPages - 1);
+    return jumpToBookProgressPercent(percent, rememberHistory);
 }
 
 const std::vector<String>& BookReader::getPageLines() const {
@@ -456,11 +572,8 @@ void BookReader::removeBookmark(int idx) {
 bool BookReader::jumpToBookmark(int idx) {
     if (idx < 0 || idx >= (int)_bookmarks.size()) return false;
     const Bookmark& bm = _bookmarks[idx];
-    _currentPage = bm.page;
-    loadChapter(bm.chapter);
-    _currentPage = bm.page;  // loadChapter may reset page, restore it
-    if (_currentPage >= _totalPages) _currentPage = _totalPages - 1;
-    updatePageLines();
+    pushHistoryPoint();
+    restoreLocation(bm.chapter, bm.page);
     return true;
 }
 
@@ -469,6 +582,48 @@ bool BookReader::isCurrentPageBookmarked() const {
         if (bm.chapter == _currentChapter && bm.page == _currentPage) return true;
     }
     return false;
+}
+
+bool BookReader::goBackInHistory() {
+    if (_history.empty()) return false;
+    ReaderLocation loc = _history.back();
+    _history.pop_back();
+    restoreLocation(loc.chapter, loc.page);
+    return true;
+}
+
+uint32_t BookReader::getEstimatedChapterRemainingMs() const {
+    if (_avgPageTimeMs == 0) return 0;
+    int remainingPages = _totalPages - _currentPage - 1;
+    if (remainingPages < 0) remainingPages = 0;
+    return remainingPages * _avgPageTimeMs;
+}
+
+uint32_t BookReader::getEstimatedBookRemainingMs() const {
+    if (_avgPageTimeMs == 0) return 0;
+    int remainingCurrent = _totalPages - _currentPage - 1;
+    if (remainingCurrent < 0) remainingCurrent = 0;
+    int remainingChapters = _parser.getChapterCount() - _currentChapter - 1;
+    if (remainingChapters < 0) remainingChapters = 0;
+    int approxPagesPerChapter = max(1, _totalPages);
+    uint32_t remainingPages = remainingCurrent + remainingChapters * approxPagesPerChapter;
+    return remainingPages * _avgPageTimeMs;
+}
+
+int BookReader::getApproxBookPercent() const {
+    int total = getApproxBookPageCount();
+    if (total <= 1) return 0;
+    return (getApproxBookPage() * 100) / (total - 1);
+}
+
+int BookReader::getApproxBookPage() const {
+    return _currentChapter * max(1, _totalPages) + _currentPage + 1;
+}
+
+int BookReader::getApproxBookPageCount() const {
+    int chapters = _parser.getChapterCount();
+    if (chapters <= 0) return max(1, _totalPages);
+    return max(1, chapters * max(1, _totalPages));
 }
 
 // ─── Progress save/load ────────────────────────────────────────────

@@ -1,22 +1,18 @@
 #include "display.h"
 #include "config.h"
 #include "epd_driver.h"
-// Sans-serif fonts (FiraSans) — 7 sizes: XS(9pt) S(11pt) M(14pt) ML(17pt) L(20pt) XL(24pt) XXL(28pt)
+// Sans-serif fonts (FiraSans) — 5 sizes: XS(9pt) S(11pt) M(14pt) ML(17pt) L(20pt)
 #include "font_xs.h"
 #include "font_s.h"
 #include "font_m.h"
 #include "font_ml.h"
 #include "font_l.h"
-#include "font_xl.h"
-#include "font_xxl.h"
-// Serif fonts (NotoSerif) — same 7 sizes
+// Serif fonts (NotoSerif) — same 5 sizes
 #include "font_serif_xs.h"
 #include "font_serif_s.h"
 #include "font_serif_m.h"
 #include "font_serif_ml.h"
 #include "font_serif_l.h"
-#include "font_serif_xl.h"
-#include "font_serif_xxl.h"
 #include "miniz.h"
 // EPD whine mitigation: the epdiy I2S bus clock can produce an audible
 // whine.  Aggressive approaches (clock-gating I2S1, driving CKH/CKV LOW)
@@ -30,21 +26,84 @@ static uint8_t* _pfb = nullptr;
 // Landscape framebuffer for pushing to hardware: 960 wide × 540 tall
 static uint8_t* _lfb = nullptr;
 
-// 7 size levels × 2 families (sans index 0, serif index 1)
+// 5 size levels × 2 families (sans index 0, serif index 1)
 static const GFXfont* _sans_fonts[] = {
-    &FiraSansXS, &FiraSansS, &FiraSansM, &FiraSansML,
-    &FiraSansL, &FiraSansXL, &FiraSansXXL
+    &FiraSansXS, &FiraSansS, &FiraSansM, &FiraSansML, &FiraSansL
 };
 static const GFXfont* _serif_fonts[] = {
-    &NotoSerifXS, &NotoSerifS, &NotoSerifM, &NotoSerifML,
-    &NotoSerifL, &NotoSerifXL, &NotoSerifXXL
+    &NotoSerifXS, &NotoSerifS, &NotoSerifM, &NotoSerifML, &NotoSerifL
 };
-static const int FONT_SIZE_COUNT = 7;
+static const int FONT_SIZE_COUNT = 5;
 static const GFXfont* _font = &FiraSansM;  // default (level 2 = M)
 
 // Full refresh counter — every N partial updates, do a full refresh
 static int _partialCount = 0;
 static const int PARTIAL_REFRESH_INTERVAL = 10;
+
+// ─── Glyph Bitmap LRU Cache (PSRAM) ──────────────────────────────────────
+
+static const int GLYPH_CACHE_SIZE = 16;  // number of cached glyphs
+static const int GLYPH_CACHE_MAX_BMP = 512; // max bitmap bytes per entry
+
+struct GlyphCacheEntry {
+    const GFXfont* font;    // which font (acts as font_id)
+    uint32_t codepoint;     // glyph codepoint
+    uint8_t bitmap[GLYPH_CACHE_MAX_BMP]; // decompressed bitmap
+    uint16_t bmpSize;       // actual bitmap size
+    uint32_t lastUsed;      // access counter for LRU
+    bool valid;
+};
+
+static GlyphCacheEntry _glyphCache[GLYPH_CACHE_SIZE];
+static uint32_t _glyphCacheAccessCounter = 0;
+
+static void glyph_cache_init() {
+    for (int i = 0; i < GLYPH_CACHE_SIZE; i++) {
+        _glyphCache[i].valid = false;
+        _glyphCache[i].lastUsed = 0;
+    }
+    _glyphCacheAccessCounter = 0;
+}
+
+// Find cached bitmap or return nullptr
+static uint8_t* glyph_cache_find(const GFXfont* font, uint32_t cp) {
+    for (int i = 0; i < GLYPH_CACHE_SIZE; i++) {
+        if (_glyphCache[i].valid && _glyphCache[i].font == font && _glyphCache[i].codepoint == cp) {
+            _glyphCache[i].lastUsed = ++_glyphCacheAccessCounter;
+            return _glyphCache[i].bitmap;
+        }
+    }
+    return nullptr;
+}
+
+// Store decompressed bitmap in cache, evicting LRU entry if needed
+static uint8_t* glyph_cache_store(const GFXfont* font, uint32_t cp, const uint8_t* bmp, uint16_t size) {
+    if (size > GLYPH_CACHE_MAX_BMP) return nullptr; // too large to cache
+
+    // Find empty slot or LRU slot
+    int slot = -1;
+    uint32_t oldest = UINT32_MAX;
+    for (int i = 0; i < GLYPH_CACHE_SIZE; i++) {
+        if (!_glyphCache[i].valid) {
+            slot = i;
+            break;
+        }
+        if (_glyphCache[i].lastUsed < oldest) {
+            oldest = _glyphCache[i].lastUsed;
+            slot = i;
+        }
+    }
+    if (slot < 0) slot = 0; // safety
+
+    _glyphCache[slot].font = font;
+    _glyphCache[slot].codepoint = cp;
+    memcpy(_glyphCache[slot].bitmap, bmp, size);
+    _glyphCache[slot].bmpSize = size;
+    _glyphCache[slot].lastUsed = ++_glyphCacheAccessCounter;
+    _glyphCache[slot].valid = true;
+
+    return _glyphCache[slot].bitmap;
+}
 
 // ─── Portrait framebuffer pixel ops ────────────────────────────────
 
@@ -95,16 +154,33 @@ static void draw_glyph(int* cursor_x, int cursor_y, uint32_t cp, uint8_t fg) {
     unsigned long bmp_size = byte_w * h;
 
     uint8_t* bitmap = nullptr;
+    bool needsFree = false;
+
     if (_font->compressed) {
-        bitmap = (uint8_t*)malloc(bmp_size);
-        if (!bitmap) { *cursor_x += glyph->advance_x; return; }
-        mz_ulong dest_len = bmp_size;
-        if (mz_uncompress(bitmap, &dest_len,
-                          &_font->bitmap[glyph->data_offset],
-                          glyph->compressed_size) != MZ_OK) {
-            free(bitmap);
-            *cursor_x += glyph->advance_x;
-            return;
+        // Check glyph cache first
+        bitmap = glyph_cache_find(_font, cp);
+        if (!bitmap) {
+            // Cache miss — decompress
+            uint8_t* tmpBuf = (uint8_t*)malloc(bmp_size);
+            if (!tmpBuf) { *cursor_x += glyph->advance_x; return; }
+            mz_ulong dest_len = bmp_size;
+            if (mz_uncompress(tmpBuf, &dest_len,
+                              &_font->bitmap[glyph->data_offset],
+                              glyph->compressed_size) != MZ_OK) {
+                free(tmpBuf);
+                *cursor_x += glyph->advance_x;
+                return;
+            }
+            // Try to store in cache
+            uint8_t* cached = glyph_cache_store(_font, cp, tmpBuf, (uint16_t)bmp_size);
+            if (cached) {
+                free(tmpBuf);
+                bitmap = cached;
+            } else {
+                // Too large for cache, use tmp and free later
+                bitmap = tmpBuf;
+                needsFree = true;
+            }
         }
     } else {
         bitmap = &_font->bitmap[glyph->data_offset];
@@ -129,7 +205,7 @@ static void draw_glyph(int* cursor_x, int cursor_y, uint32_t cp, uint8_t fg) {
         }
     }
 
-    if (_font->compressed) free(bitmap);
+    if (needsFree) free(bitmap);
     *cursor_x += glyph->advance_x;
 }
 
@@ -148,6 +224,8 @@ void display_init() {
     }
     memset(_pfb, 0xFF, PORTRAIT_W * PORTRAIT_H / 2);
     memset(_lfb, 0xFF, PHYS_WIDTH * PHYS_HEIGHT / 2);
+
+    glyph_cache_init();
 }
 
 void display_clear() {
@@ -324,7 +402,7 @@ void display_update_sleep() {
     epd_poweron();
     epd_clear_area_cycles(epd_full_screen(), 6, 50);
     epd_draw_grayscale_image(epd_full_screen(), _lfb);
-    epd_poweroff();
+    epd_poweroff_all();  // zero all control bits for clean power state
 
     _partialCount = 0;
 }
@@ -365,15 +443,68 @@ void display_update_fast() {
     _partialCount = 0;
 }
 
+// Rotate only a sub-region of the portrait framebuffer to landscape.
+// Returns a freshly allocated buffer sized to the landscape sub-region.
+// The caller must free() the returned buffer.
+static uint8_t* rotatePortraitRegion(int px, int py, int pw, int ph, Rect_t& outArea) {
+    // Clamp to portrait bounds
+    if (px < 0) { pw += px; px = 0; }
+    if (py < 0) { ph += py; py = 0; }
+    if (px + pw > PORTRAIT_W) pw = PORTRAIT_W - px;
+    if (py + ph > PORTRAIT_H) ph = PORTRAIT_H - py;
+    if (pw <= 0 || ph <= 0) return nullptr;
+
+    // Landscape coords: lx = py..py+ph-1, ly = (PW-1)-(px+pw-1)..(PW-1)-px
+    outArea.x = py;
+    outArea.y = (PORTRAIT_W - 1) - (px + pw - 1);
+    outArea.width = ph;
+    outArea.height = pw;
+
+    int l_stride = (outArea.width + 1) / 2;  // bytes per row in output
+    size_t outBytes = (size_t)l_stride * outArea.height;
+    uint8_t* out = (uint8_t*)malloc(outBytes);
+    if (!out) return nullptr;
+    memset(out, 0xFF, outBytes);
+
+    int p_stride = PORTRAIT_W / 2;  // bytes per portrait row
+
+    for (int col = px; col < px + pw; col++) {
+        // Portrait column 'col' maps to landscape row ly = (PW-1) - col
+        int ly = (PORTRAIT_W - 1) - col;
+        int outRow = ly - outArea.y;  // row index within output buffer
+        uint8_t* dstRow = out + outRow * l_stride;
+
+        int p_byte_col = col / 2;
+        bool col_odd = col & 1;
+
+        for (int row = py; row < py + ph; row++) {
+            // Read portrait pixel
+            uint8_t pbyte = _pfb[row * p_stride + p_byte_col];
+            uint8_t val = col_odd ? (pbyte & 0x0F) : ((pbyte >> 4) & 0x0F);
+
+            // Landscape lx = row, offset within output = lx - outArea.x
+            int outCol = row - outArea.x;
+            int dstByte = outCol / 2;
+            if (outCol & 1) {
+                dstRow[dstByte] = (dstRow[dstByte] & 0x0F) | ((val & 0x0F) << 4);
+            } else {
+                dstRow[dstByte] = (dstRow[dstByte] & 0xF0) | (val & 0x0F);
+            }
+        }
+    }
+
+    return out;
+}
+
 void display_update_reader_body(int x, int y, int w, int h, bool strongCleanup) {
-    if (!_pfb || !_lfb) return;
+    if (!_pfb) return;
 
     unsigned long t0 = millis();
-    rotatePortraitToLandscape();
-    Rect_t area = portraitRectToLandscape(x, y, w, h);
-    uint8_t* region = extractLandscapeArea(area);
+    Rect_t area;
+    uint8_t* region = rotatePortraitRegion(x, y, w, h, area);
     unsigned long t1 = millis();
-    Serial.printf("Rotation+extract: %lums area=%ldx%ld\n", t1 - t0, (long)area.width, (long)area.height);
+    Serial.printf("Partial rotation: %lums area=%ldx%ld (was full=%dx%d)\n",
+                  t1 - t0, (long)area.width, (long)area.height, PORTRAIT_W, PORTRAIT_H);
 
     if (!region || area.width <= 0 || area.height <= 0) {
         if (region) free(region);
@@ -381,12 +512,10 @@ void display_update_reader_body(int x, int y, int w, int h, bool strongCleanup) 
         return;
     }
 
-
     epd_poweron();
     epd_clear_area_cycles(area, strongCleanup ? 2 : 1, strongCleanup ? 40 : 30);
     epd_draw_grayscale_image(area, region);
     epd_poweroff_all();
-
 
     free(region);
     _partialCount = 0;
@@ -453,7 +582,11 @@ void display_set_font_size(int sizeLevel) {
 void display_set_font(int sizeLevel, bool serif) {
     if (sizeLevel < 0) sizeLevel = 0;
     if (sizeLevel >= FONT_SIZE_COUNT) sizeLevel = FONT_SIZE_COUNT - 1;
-    _font = serif ? _serif_fonts[sizeLevel] : _sans_fonts[sizeLevel];
+    const GFXfont* newFont = serif ? _serif_fonts[sizeLevel] : _sans_fonts[sizeLevel];
+    if (newFont != _font) {
+        _font = newFont;
+        glyph_cache_init();  // invalidate cache on font change
+    }
     Serial.printf("Font set to %s level %d (advance_y=%d)\n",
                   serif ? "serif" : "sans", sizeLevel, _font->advance_y);
 }

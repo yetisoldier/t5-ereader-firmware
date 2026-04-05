@@ -50,6 +50,7 @@ public:
     void close();
 
     const String& getTitle() const { return _title; }
+    const String& getAuthor() const { return _author; }
     int getChapterCount() const { return _spine.size(); }
     String getChapterText(int index);
     String getChapterHtml(int index);
@@ -71,6 +72,7 @@ public:
 private:
     ZipReader _zip;
     String _title;
+    String _author;
     String _basePath;
     std::vector<SpineItem> _spine;
     std::vector<ManifestItem> _manifest;

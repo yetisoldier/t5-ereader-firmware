@@ -15,6 +15,11 @@ struct Bookmark {
     String label;
 };
 
+struct ReaderLocation {
+    int chapter = 0;
+    int page = 0;
+};
+
 // ChapterCache removed — wrapped lines are now stored on SD card
 // to avoid heap exhaustion on chapters with 500+ lines.
 
@@ -33,8 +38,11 @@ public:
 
     bool nextPage();
     bool prevPage();
-    void jumpToChapter(int chapter);
+    void jumpToChapter(int chapter, bool rememberHistory = false);
     void restorePage(int page);  // Set page within current chapter (clamped)
+    void restoreLocation(int chapter, int page);
+    bool jumpToBookProgressPercent(int percent, bool rememberHistory = false);
+    bool jumpToApproxBookPage(int page, bool rememberHistory = false);
     bool didChapterChange() const { return _chapterChanged; }  // true if last page turn crossed a chapter boundary
 
     const std::vector<String>& getPageLines() const;
@@ -50,6 +58,8 @@ public:
     bool jumpToBookmark(int idx);
     const std::vector<Bookmark>& getBookmarks() const { return _bookmarks; }
     bool isCurrentPageBookmarked() const;
+    bool hasNavigationHistory() const { return !_history.empty(); }
+    bool goBackInHistory();
 
     // Chapter title access (delegates to parser)
     String getChapterTitle(int index);
@@ -67,6 +77,13 @@ public:
     uint32_t getTotalReadingTimeSec() const { return _totalReadingTimeSec; }
     uint32_t getTotalPagesRead() const { return _totalPagesRead; }
     void updateReadingTime();  // Call periodically to accumulate session time
+    uint32_t getAveragePageTimeMs() const { return _avgPageTimeMs; }
+    uint32_t getEstimatedChapterRemainingMs() const;
+    uint32_t getEstimatedBookRemainingMs() const;
+    int getApproxBookPercent() const;
+    int getApproxBookPage() const;
+    int getApproxBookPageCount() const;
+    const String& getAuthor() const { return _author; }
 
     // Parser access for inline image rendering
     EpubParser& getParser() { return _parser; }
@@ -74,6 +91,7 @@ public:
 private:
     EpubParser _parser;
     String _title;
+    String _author;
     String _filepath;
     int _currentChapter = 0;
     int _currentPage = 0;
@@ -96,6 +114,7 @@ private:
 
     // Bookmarks
     std::vector<Bookmark> _bookmarks;
+    std::vector<ReaderLocation> _history;
 
     // Last-read order (monotonic counter)
     uint32_t _lastReadOrder = 0;
@@ -110,10 +129,17 @@ private:
     uint32_t _totalPagesRead = 0;
     unsigned long _sessionStartMs = 0;
     unsigned long _lastTimeUpdateMs = 0;
+    unsigned long _pageShownAtMs = 0;
+    std::vector<uint32_t> _recentPageTimesMs;
+    uint32_t _avgPageTimeMs = 0;
+    int _currentChapterWordCount = 0;
 
     void loadChapter(int chapter);
     void updatePageLines();
     void paginateLines();
     void wrapTextToFile(const String& text);  // write wrapped lines to SD cache
     String readLineFromCache(int lineIndex);   // read single line from SD cache
+    void recordPageTurnTime();
+    void notePageShown();
+    void pushHistoryPoint();
 };

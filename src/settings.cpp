@@ -11,6 +11,7 @@ static const char* SETTINGS_TMP  = "/books/.settings.tmp";
 void settings_set_default() {
     _settings.fontSize        = 2;  // legacy: maps to fontSizeLevel 2 (M)
     _settings.fontSizeLevel   = 2;  // M (default)
+    _settings.lineSpacingLevel = 2;
     _settings.serifFont       = false;
     _settings.sleepTimeoutMin = 5;
     _settings.refreshEveryPages = 4;
@@ -20,6 +21,7 @@ void settings_set_default() {
     _settings.showBattery     = true;
     _settings.tapZoneLayout   = 0;
     _settings.libraryViewMode = 0;
+    _settings.librarySortOrder = 0;
     _settings.posterShowCovers = false;
     _settings.opdsActiveServer = 0;
 }
@@ -46,6 +48,7 @@ void settings_init() {
 
     _settings.fontSize        = doc["fontSize"]        | 2;
     _settings.fontSizeLevel   = doc["fontSizeLevel"]   | -1;
+    _settings.lineSpacingLevel = doc["lineSpacingLevel"] | 2;
     _settings.serifFont       = doc["serifFont"]       | false;
     _settings.sleepTimeoutMin = doc["sleepTimeoutMin"]  | 5;
     _settings.refreshEveryPages = doc["refreshEveryPages"] | 4;
@@ -55,6 +58,7 @@ void settings_init() {
     _settings.showBattery     = doc["showBattery"]      | true;
     _settings.tapZoneLayout   = doc["tapZoneLayout"]    | 0;
     _settings.libraryViewMode = doc["libraryViewMode"]  | 0;
+    _settings.librarySortOrder = doc["librarySortOrder"] | 0;
     _settings.posterShowCovers = doc["posterShowCovers"] | false;
     _settings.opdsActiveServer = doc["opdsActiveServer"] | 0;
 
@@ -69,9 +73,11 @@ void settings_init() {
 
     // Clamp values
     if (_settings.fontSizeLevel < 0 || _settings.fontSizeLevel > 6) _settings.fontSizeLevel = 2;
+    if (_settings.lineSpacingLevel >= LINE_SPACING_LEVEL_COUNT) _settings.lineSpacingLevel = 2;
     if (_settings.sleepTimeoutMin < 1) _settings.sleepTimeoutMin = 5;
     if (_settings.refreshEveryPages < 1) _settings.refreshEveryPages = 4;
     if (_settings.libraryViewMode < 0 || _settings.libraryViewMode > 1) _settings.libraryViewMode = 0;
+    if (_settings.librarySortOrder > 3) _settings.librarySortOrder = 0;
 
     Serial.printf("Settings: loaded (fontLevel=%d, serif=%d, sleep=%dmin, refresh=%d, wifi=%s)\n",
                   _settings.fontSizeLevel, _settings.serifFont,
@@ -84,6 +90,7 @@ void settings_save() {
     StaticJsonDocument<512> doc;
     doc["fontSize"]        = _settings.fontSizeLevel; // write new level as fontSize too for compat
     doc["fontSizeLevel"]   = _settings.fontSizeLevel;
+    doc["lineSpacingLevel"] = _settings.lineSpacingLevel;
     doc["serifFont"]       = _settings.serifFont;
     doc["sleepTimeoutMin"] = _settings.sleepTimeoutMin;
     doc["refreshEveryPages"] = _settings.refreshEveryPages;
@@ -93,6 +100,7 @@ void settings_save() {
     doc["showBattery"]     = _settings.showBattery;
     doc["tapZoneLayout"]   = _settings.tapZoneLayout;
     doc["libraryViewMode"] = _settings.libraryViewMode;
+    doc["librarySortOrder"] = _settings.librarySortOrder;
     doc["posterShowCovers"] = _settings.posterShowCovers;
     doc["opdsActiveServer"] = _settings.opdsActiveServer;
 

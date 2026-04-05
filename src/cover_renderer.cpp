@@ -7,7 +7,9 @@
 #include <vector>
 #include "epub.h"
 #include "display.h"
+#include "config.h"
 #include "image_tone.h"
+#include "settings.h"
 #include <JPEGDEC.h>
 #include <PNGdec.h>
 
@@ -33,7 +35,7 @@ static ThumbContext* g_thumbCtx = nullptr;
 static JPEGDEC g_jpeg;
 static PNG g_png;
 static std::vector<ThumbCacheEntry> g_thumbCache;
-static const size_t MAX_THUMB_CACHE = 6;
+static const size_t MAX_THUMB_CACHE = 24;  // Increased from 16 to hold 3+ pages of poster view for pre-caching
 
 bool cover_can_render_poster(const BookInfo& book) {
     if (!book.hasCover || book.coverPath.length() == 0) return false;
@@ -307,4 +309,112 @@ bool cover_render_poster(BookInfo& book, int x, int y, int w, int h) {
     free(ctx.pixels);
     free(data);
     return ok;
+}
+
+// Pre-cache covers for adjacent pages to warm the cache
+void cover_precache_page(std::vector<BookInfo>& books, const std::vector<int>& filteredIndices, int scroll, int cardsPerPage) {
+    if (!settings_get().posterShowCovers) return;  // Only needed for poster view
+    
+    const int cols = 2;
+    const int gap = 18;
+    int posterW = (PORTRAIT_W - MARGIN_X * 2 - gap) / cols;
+    int posterH = 310;
+    
+    // Pre-cache next page (scroll + cardsPerPage to scroll + 2*cardsPerPage - 1)
+    int nextStart = scroll + cardsPerPage;
+    int nextEnd = std::min(nextStart + cardsPerPage, (int)filteredIndices.size());
+    
+    for (int vi = nextStart; vi < nextEnd; vi++) {
+        int bi = filteredIndices[vi];
+        BookInfo& book = books[bi];
+        
+        if (!cover_can_render_poster(book) || book.posterCoverFailed) continue;
+        
+        int maxW = posterW - 24;  // innerPad * 2
+        int maxH = posterH - 24;
+        String cacheKey = make_cache_key(book, maxW, maxH);
+        
+        // Skip if already cached
+        if (find_cache_entry(cacheKey)) continue;
+        
+        // Render to cache only (no display)
+        EpubParser parser;
+        if (!parser.open(book.filepath.c_str())) continue;
+        
+        size_t size = 0;
+        uint8_t* data = parser.readAsset(book.coverPath, &size);
+        parser.close();
+        
+        if (!data || size < 1500) {
+            if (data) free(data);
+            continue;
+        }
+        
+        bool isJpeg = ends_with_ci(book.coverPath, ".jpg") || ends_with_ci(book.coverPath, ".jpeg");
+        bool isPng = ends_with_ci(book.coverPath, ".png");
+        if (!isJpeg && !isPng) {
+            free(data);
+            continue;
+        }
+        
+        ThumbContext ctx;
+        ctx.pixels = (uint8_t*)ps_malloc((size_t)maxW * maxH);
+        if (!ctx.pixels) {
+            free(data);
+            continue;
+        }
+        memset(ctx.pixels, 255, (size_t)maxW * maxH);
+        
+        bool decoderOpened = false;
+        bool ok = false;
+        
+        if (isJpeg) {
+            decoderOpened = g_jpeg.openRAM(data, (int)size, jpegDrawCallback);
+            if (decoderOpened) {
+                ctx.srcW = g_jpeg.getWidth();
+                ctx.srcH = g_jpeg.getHeight();
+                if (cover_asset_quality_ok(size, ctx.srcW, ctx.srcH)) {
+                    int drawW = maxW;
+                    int drawH = (ctx.srcH * drawW) / ctx.srcW;
+                    if (drawH > maxH) {
+                        drawH = maxH;
+                        drawW = (ctx.srcW * drawH) / ctx.srcH;
+                    }
+                    ctx.dstW = std::max(1, drawW);
+                    ctx.dstH = std::max(1, drawH);
+                    g_thumbCtx = &ctx;
+                    ok = g_jpeg.decode(0, 0, 0) == 1;
+                    g_thumbCtx = nullptr;
+                }
+                g_jpeg.close();
+            }
+        } else if (isPng) {
+            decoderOpened = g_png.openRAM(data, (int)size, pngDrawCallback) == PNG_SUCCESS;
+            if (decoderOpened) {
+                ctx.srcW = g_png.getWidth();
+                ctx.srcH = g_png.getHeight();
+                if (cover_asset_quality_ok(size, ctx.srcW, ctx.srcH)) {
+                    int drawW = maxW;
+                    int drawH = (ctx.srcH * drawW) / ctx.srcW;
+                    if (drawH > maxH) {
+                        drawH = maxH;
+                        drawW = (ctx.srcW * drawH) / ctx.srcH;
+                    }
+                    ctx.dstW = std::max(1, drawW);
+                    ctx.dstH = std::max(1, drawH);
+                    g_thumbCtx = &ctx;
+                    ok = g_png.decode(nullptr, 0) == PNG_SUCCESS;
+                    g_thumbCtx = nullptr;
+                }
+                g_png.close();
+            }
+        }
+        
+        if (ok && ctx.pixels && ctx.dstW > 0 && ctx.dstH > 0) {
+            store_cache_entry(cacheKey, ctx);
+        }
+        
+        free(ctx.pixels);
+        free(data);
+    }
 }
