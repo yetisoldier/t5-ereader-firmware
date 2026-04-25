@@ -1,6 +1,9 @@
 #include "display.h"
 #include "config.h"
 #include "epd_driver.h"
+#include "debug_trace.h"
+#include <esp_heap_caps.h>
+#include <soc/soc_memory_types.h>
 // Sans-serif fonts (FiraSans) — 5 sizes: XS(9pt) S(11pt) M(14pt) ML(17pt) L(20pt)
 #include "font_xs.h"
 #include "font_s.h"
@@ -239,8 +242,25 @@ void display_clear() {
 }
 
 void display_fill_screen(uint8_t gray4) {
+    debug_trace_mark("display_fill_screen:start",
+                     String((uint32_t)(uintptr_t)_pfb, HEX));
+    if (!_pfb) {
+        debug_trace_mark("display_fill_screen:null_pfb");
+        return;
+    }
+    if (!esp_ptr_external_ram(_pfb)) {
+        debug_trace_mark("display_fill_screen:pfb_not_psram",
+                         String((uint32_t)(uintptr_t)_pfb, HEX));
+    }
+    if (!heap_caps_check_integrity_addr((intptr_t)_pfb, true)) {
+        debug_trace_mark("display_fill_screen:pfb_corrupt",
+                         String((uint32_t)(uintptr_t)_pfb, HEX));
+        return;
+    }
+
     uint8_t byte = (gray4 & 0x0F) | ((gray4 & 0x0F) << 4);
     memset(_pfb, byte, PORTRAIT_W * PORTRAIT_H / 2);
+    debug_trace_mark("display_fill_screen:done");
 }
 
 void display_draw_text(int x, int y, const char* text, uint8_t fg_color) {

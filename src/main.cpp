@@ -14,6 +14,7 @@
 #include "gnome_splash.h"
 #include "opds_store.h"
 #include "state.h"
+#include "debug_trace.h"
 #include "ui/ui_library.h"
 #include "ui/ui_reader.h"
 #include "ui/ui_settings.h"
@@ -551,6 +552,8 @@ void setup() {
     Serial.begin(115200);
     delay(500);
     Serial.println("\n=== T5 E-Reader Firmware (Portrait) ===");
+    debug_trace_boot_report();
+    debug_trace_mark("setup:start");
 
     esp_sleep_wakeup_cause_t wakeReason = esp_sleep_get_wakeup_cause();
     bool wakingFromSleep = (wakeReason == ESP_SLEEP_WAKEUP_EXT1 ||
@@ -579,7 +582,9 @@ void setup() {
         Serial.println("Wake: button released, proceeding");
     }
 
+    debug_trace_mark("setup:before_display_init");
     display_init();
+    debug_trace_mark("setup:after_display_init");
 
     if (wakingFromSleep) {
         showWakeFeedback();
@@ -596,13 +601,18 @@ void setup() {
     // the framebuffer and push a full refresh, which cleanly replaces the
     // sleep image with the restored UI.
 
+    debug_trace_mark("setup:before_battery_init");
     battery_init();
+    debug_trace_mark("setup:after_battery_init");
     Serial.printf("Battery: %.2fV (%d%%)\n", battery_voltage(), battery_percent());
 
+    debug_trace_mark("setup:before_touch_init");
     if (!touch_init()) {
         Serial.println("WARNING: Touch not available");
     }
+    debug_trace_mark("setup:after_touch_init");
 
+    debug_trace_mark("setup:before_library_init");
     if (!library_init()) {
         display_fill_screen(15);
         const char* err = "SD Card Error!";
@@ -614,9 +624,13 @@ void setup() {
         display_update();
     }
 
+    debug_trace_mark("setup:after_library_init");
     settings_init();
+    debug_trace_mark("setup:after_settings_init");
     display_set_font(settings_get().fontSizeLevel, settings_get().serifFont);
+    debug_trace_mark("setup:before_library_scan");
     books = library_scan();
+    debug_trace_mark("setup:after_library_scan", String(books.size()));
     updateFilteredIndices();
     cover_cache_clear();
     wifi_upload_init();
@@ -640,6 +654,7 @@ void setup() {
 
         bool resumedReader = false;
         if (savedState == (int)STATE_READER && savedBook.length() > 0) {
+            debug_trace_mark("wake:before_openBook", savedBook);
             // ── Crash guard: increment count BEFORE the risky openBook call ──
             {
                 Preferences cgPrefs;
@@ -664,6 +679,7 @@ void setup() {
                 // Reopen the book — openBook() calls loadProgress() internally,
                 // which restores chapter + page from the progress JSON on SD.
                 if (reader.openBook(savedBook.c_str())) {
+                    debug_trace_mark("wake:after_openBook", savedBook);
                     // Book opened successfully — reset crash guard
                     Preferences okPrefs;
                     okPrefs.begin("ereader", false);
@@ -688,15 +704,20 @@ void setup() {
         if (!resumedReader) {
             appState = STATE_LIBRARY;
         }
+        debug_trace_mark("wake:post_restore", String((int)appState));
 
         // Draw the restored screen immediately after the wake banner so the
         // user gets instant acknowledgement first, then the restored content.
         firstLibraryDraw = true;
         needsRedraw = true;
         if (appState == STATE_READER) {
+            debug_trace_mark("wake:before_draw_reader");
             drawReaderScreen();
+            debug_trace_mark("wake:after_draw_reader");
         } else {
+            debug_trace_mark("wake:before_draw_library");
             drawLibraryScreen();
+            debug_trace_mark("wake:after_draw_library");
         }
         needsRedraw = false;
         Serial.println("Wake: immediate screen draw complete");
@@ -712,6 +733,7 @@ void setup() {
     // Configure light sleep with GPIO wakeup
     configureLightSleep();
 
+    debug_trace_mark("setup:complete");
     Serial.println("Setup complete");
 }
 
@@ -838,14 +860,17 @@ void loop() {
         if (!touchHandled) {
             int tx = lastTouchPt.x;
             int ty = lastTouchPt.y;
-            int dx = currentPt.x - lastTouchPt.x;
-            int dy = currentPt.y - lastTouchPt.y;
-            int absDx = abs(dx);
-            int absDy = abs(dy);
+            int dx = 0;
+            int dy = 0;
+            int absDx = 0;
+            int absDy = 0;
             unsigned long duration = millis() - touchDownTime;
             bool isLongPress = (duration >= LONG_PRESS_MS);
 
-            // Detect horizontal swipe in reader and library modes
+            // Detect horizontal swipe in reader and library modes.
+            // We only have a valid end coordinate while the finger is still down;
+            // on release currentPt may be stale/undefined, so treat release as tap
+            // unless/until we add explicit move tracking.
             bool swipeHandled = false;
             if (absDx > 60 && absDy < 80) {
                 if (appState == STATE_READER) {

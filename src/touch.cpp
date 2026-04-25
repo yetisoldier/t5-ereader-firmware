@@ -66,21 +66,18 @@ bool touch_init() {
 bool touch_read(TouchPoint &pt) {
     if (!_initialized) return false;
 
-    int16_t x[2], y[2];
-    uint8_t count = _touch.getPoint(x, y, 2);
+    if (!_touch.isPressed()) return false;
 
-    if (count > 0) {
-        // Library returns landscape coords after setSwapXY/setMirrorXY.
-        // Convert to portrait using inverse of display rotation
-        // (display: portrait px,py → landscape lx=py, ly=(PW-1)-px).
-        // Inverse: portrait_x = (PW-1) - landscape_y, portrait_y = landscape_x.
-        pt.x = (PORTRAIT_W - 1) - y[0];
-        pt.y = x[0];
+    int16_t x[2] = {0, 0};
+    int16_t y[2] = {0, 0};
+    uint8_t count = _touch.getPoint(x, y, 1);
+    if (count == 0) return false;
 
-        // Uncomment for coordinate debugging:
-        // Serial.printf("TOUCH: landscape(%d,%d) → portrait(%d,%d)\n",
-        //                x[0], y[0], pt.x, pt.y);
-        return true;
-    }
-    return false;
+    // Library returns landscape coords after setSwapXY/setMirrorXY.
+    // Convert to portrait using inverse of display rotation
+    // (display: portrait px,py → landscape lx=py, ly=(PW-1)-px).
+    // Inverse: portrait_x = (PW-1) - landscape_y, portrait_y = landscape_x.
+    pt.x = (PORTRAIT_W - 1) - y[0];
+    pt.y = x[0];
+    return true;
 }

@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.4.1 — 2026-04-25
+
+### Changed
+- Inline EPUB image handling now prioritizes stability on real hardware while the PNG render path is being reworked
+
+### Fixed
+- **Inline PNG reboot loop:** PNG images embedded in some EPUBs no longer hard-reset the device during page render
+- **Graceful image fallback:** Unsupported or temporarily blocked inline PNG renders now fall back cleanly instead of crashing the reader
+- **Crash diagnostics:** Added persistent debug trace markers around boot, wake, display, and reader rendering to speed up hardware fault isolation
+- **Touch release safety:** Reader touch handling now avoids using stale release coordinates during gesture/tap resolution
+
 ## v0.4.0 — 2026-04-04
 
 ### Added
