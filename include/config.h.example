@@ -71,9 +71,17 @@
 #define PROGRESS_BAR_H 4
 
 // ─── Font Size Presets (line spacing + margins) ────────────────────
-// fontSize=0 (Small): tighter spacing, narrower margins
-// fontSize=1 (Medium): default
-// fontSize=2 (Large): wider spacing, wider margins
+// fontSizeLevel 0–4: XS, S, M, ML, L
+// Line spacing and horizontal margins per level
+#define FONT_SIZE_LEVEL_COUNT  5
+static const int FONT_LINE_SPACINGS[FONT_SIZE_LEVEL_COUNT] = { 0, 0, 1, 2, 3 };
+static const int FONT_MARGIN_X_VALUES[FONT_SIZE_LEVEL_COUNT] = { 15, 20, 30, 30, 35 };
+
+// Adjustable leading multipliers (line height as a multiple of font height)
+#define LINE_SPACING_LEVEL_COUNT 5
+static const uint8_t LINE_SPACING_PCT[LINE_SPACING_LEVEL_COUNT] = {100, 110, 120, 140, 160};
+
+// Legacy defines kept for any remaining references
 #define FONT_LINE_SPACING_SMALL   0
 #define FONT_LINE_SPACING_MEDIUM  1
 #define FONT_LINE_SPACING_LARGE   4
