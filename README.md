@@ -8,7 +8,7 @@ EPUB reader firmware for the LilyGo T5 4.7 inch ESP32-S3 e-paper board.
 
 ## Status
 
-Current firmware version: **v0.4.1**
+Current firmware version: **v0.4.2**
 
 This branch is tuned for the real device workflow now in code:
 - portrait UI on the 960x540 panel
@@ -39,9 +39,9 @@ This branch is tuned for the real device workflow now in code:
 - Inline image rendering from EPUB content
 - Fast partial refresh for most page turns with stronger cleanup refreshes on cadence
 
-Current inline image note for **v0.4.1**:
+Current inline image note for **v0.4.2**:
 - JPEG inline images render normally
-- PNG inline images are temporarily downgraded to a safe fallback while the PNG renderer is being hardened on-device
+- PNG inline images render again using the hardened file-backed decode path
 - Reader progress bar, chapter indicator, page indicator, and optional battery display
 - Bookmarks
 
@@ -177,19 +177,26 @@ Practical guidance:
 
 ## Inline EPUB image status
 
-Supported inline EPUB image behavior in **v0.4.1**:
+Supported inline EPUB image behavior in **v0.4.2**:
 - `.jpg`
 - `.jpeg`
-- `.png` extraction/probing support is present, but inline PNG rendering currently falls back safely instead of drawing on-screen
+- `.png`
 
-Why the temporary limitation:
-- A real-device bug was causing some inline PNG renders to reset the reader.
-- Version 0.4.1 ships the stability fix first: no reboot loop, graceful fallback instead of a hard reset.
-- PNG inline rendering will be restored once the decode path is reworked to match the more reliable image pipeline already used elsewhere in the firmware.
+Current behavior:
+- Inline JPEG and PNG images render on-device through the file-backed image path.
+- The renderer now uses safer asset guards and PNG line buffering sized to the decoded image width.
+- The earlier real-device PNG reset issue was fixed before this release.
 
 ## OTA updates
 
-OTA support is present in the firmware and release workflow, but it was **not end-to-end validated on hardware in this release-prep pass**. Treat it as available code that still deserves a real-device verification.
+OTA support is present in the firmware and release workflow, and the update-check / return-to-settings path has now been validated on hardware.
+
+Current validation status:
+- Settings → Firmware Update → check for updates
+- WiFi failure handling and recovery back to Settings
+- Returning from the OTA screen without freezing the device
+
+Full install validation still depends on testing against a newer published release asset.
 
 Current OTA flow in the firmware:
 1. Open **Settings** on the device.
@@ -199,7 +206,7 @@ Current OTA flow in the firmware:
 5. Tap to install, wait for the download to complete, and the device restarts when the update succeeds.
 
 Current release-side expectations:
-- Releases are driven by Git tags like `v0.4.1`.
+- Releases are driven by Git tags like `v0.4.2`.
 - The GitHub Actions release workflow builds the `gh_release` PlatformIO environment.
 - That workflow uploads `.pio/build/gh_release/firmware.bin` to the GitHub release.
 - The device-side OTA checker expects that `firmware.bin` asset name.

@@ -126,19 +126,21 @@ void ui_ota_tick(OtaState& otaState) {
 
     if (WiFi.status() != WL_CONNECTED) {
         Settings& s = settings_get();
+        WiFi.mode(WIFI_STA);
         WiFi.begin(s.wifiSSID.c_str(), s.wifiPass.c_str());
         unsigned long start = millis();
         while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
-            delay(100);
+            delay(250);
         }
     }
 
     if (WiFi.status() != WL_CONNECTED) {
         otaState.phase = OTA_FAILED;
-        otaState.latestVersion = "Connect to WiFi first";
+        otaState.latestVersion = "WiFi connect failed";
+        WiFi.disconnect(true);
+        WiFi.mode(WIFI_OFF);
         return;
     }
-
     otaState.updateAvailable = ota_check_for_update(otaState.latestVersion);
     otaState.phase = OTA_RESULT;
 }
@@ -149,6 +151,8 @@ AppState ui_ota_touch(int x, int y, OtaState& otaState) {
     // Footer → back (cancel)
     if (y > H - FOOTER_HEIGHT) {
         otaState.phase = OTA_IDLE;
+        WiFi.disconnect(true);
+        WiFi.mode(WIFI_OFF);
         return STATE_SETTINGS;
     }
 
@@ -203,6 +207,8 @@ AppState ui_ota_touch(int x, int y, OtaState& otaState) {
     // In failed state → back
     if (otaState.phase == OTA_FAILED || (otaState.phase == OTA_RESULT && !otaState.updateAvailable)) {
         otaState.phase = OTA_IDLE;
+        WiFi.disconnect(true);
+        WiFi.mode(WIFI_OFF);
         return STATE_SETTINGS;
     }
 

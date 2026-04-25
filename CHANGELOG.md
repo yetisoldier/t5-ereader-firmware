@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.4.2 — 2026-04-25
+
+### Changed
+- Settings screen bottom layout now places **Reset Defaults** lower for cleaner separation from the Reading/Device page selector
+- OTA screen flow now performs the update check outside the draw path and cleans up WiFi state consistently when leaving the OTA screen
+
+### Fixed
+- **OTA return freeze:** Returning to Settings after checking for updates no longer freezes the device
+- **OTA WiFi failure recovery:** Failed WiFi connection attempts now return a clear error state and shut WiFi down cleanly on exit
+- **Settings redraw path:** Settings refresh handling now uses a one-shot softer transition only when entering from another screen, then returns to normal full redraws
+- **Version label rendering:** Manual release builds now display the expected firmware version on-device
+- **Inline PNG rendering restored:** Hardened file-backed PNG decode/render path is back in service on-device
+
 ## v0.4.1 — 2026-04-25
 
 ### Changed

@@ -15,6 +15,8 @@ static const int W = PORTRAIT_W;
 static const int H = PORTRAIT_H;
 static const int FONT_H = 50;
 static const int SETTINGS_ROW_H = FONT_H + 8;
+static const int SETTINGS_NAV_GAP_Y = 50;
+static const int SETTINGS_RESET_Y_OFFSET = 180;
 static int settingsPage = 0; // 0 = Reading, 1 = Device
 
 // ─── Settings option arrays ─────────────────────────────────────────
@@ -190,7 +192,7 @@ void ui_settings_draw(bool& settingsFromLibrary) {
     // Lower gap: page navigation + reset/version in lower gap
     {
         int footerTop = H - FOOTER_HEIGHT;
-        int navY = y + 50;
+        int navY = y + SETTINGS_NAV_GAP_Y;
         
         // Draw tab buttons similar to library page controls
         // Active tab has filled background, inactive tab is gray text
@@ -220,10 +222,11 @@ void ui_settings_draw(bool& settingsFromLibrary) {
             display_draw_text(W - MARGIN_X - rtw, navY + FONT_H - 4, rightLabel, 3);
         }
 
-        int baseY = navY + 90;
-        if (baseY + FONT_H < footerTop - 20) {
+        int versionY = navY + 90;
+        int resetY = navY + SETTINGS_RESET_Y_OFFSET;
+        if (resetY + FONT_H < footerTop - 20) {
             const char* resetLabel = "[ Reset Defaults ]";
-            display_draw_text(MARGIN_X, baseY, resetLabel, 3);
+            display_draw_text(MARGIN_X, resetY, resetLabel, 3);
 
             char verLabel[32];
             if (FIRMWARE_VERSION[0] == 'v' || FIRMWARE_VERSION[0] == 'V') {
@@ -232,12 +235,17 @@ void ui_settings_draw(bool& settingsFromLibrary) {
                 snprintf(verLabel, sizeof(verLabel), "Firmware: v%s", FIRMWARE_VERSION);
             }
             int vw = display_text_width(verLabel);
-            display_draw_text(W - MARGIN_X - vw, baseY, verLabel, 8);
+            display_draw_text(W - MARGIN_X - vw, versionY, verLabel, 8);
         }
     }
 
     drawBottomBar("[ Back ]");
-    display_update_medium();
+    if (settingsFromLibrary) {
+        display_update_medium();
+        settingsFromLibrary = false;
+    } else {
+        display_update();
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -358,22 +366,16 @@ AppState ui_settings_touch(int x, int y, BookReader& reader, void (*enterSleepCb
     int gapTop = rowY + SETTINGS_ROW_H * rowCount;
     int footerTop = H - FOOTER_HEIGHT;
     
-    // Debug: show touch coordinates
-    Serial.printf("Settings touch: y=%d, gapTop=%d, footerTop=%d\n", y, gapTop, footerTop);
-    
     if (y >= gapTop && y < footerTop) {
-        int navY = gapTop + 50;  // Match drawing position
-        int resetY = navY + 90;
-        Serial.printf("  navY=%d, resetY=%d\n", navY, resetY);
-        
+        int navY = gapTop + SETTINGS_NAV_GAP_Y;  // Match drawing position
+        int resetY = navY + SETTINGS_RESET_Y_OFFSET;
+
         // Touch zone for tab buttons (wider to match visual buttons)
         if (y >= navY - 10 && y < navY + FONT_H + 10) {
             if (x < W / 2) {
                 settingsPage = 0;
-                Serial.println("  -> Switched to Reading page");
             } else {
                 settingsPage = 1;
-                Serial.println("  -> Switched to Device page");
             }
             return STATE_SETTINGS;
         }

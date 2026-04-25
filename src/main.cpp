@@ -29,11 +29,12 @@
 // ─── App State ──────────────────────────────────────────────────────
 static AppState       appState = STATE_BOOT;
 static bool           firstLibraryDraw = true;  // full refresh after splash to clear ghost
-static bool           settingsFromLibrary = false;  // quicker refresh on library→settings transition
+static bool           settingsSoftRefreshOnce = false;  // lighter one-shot refresh when entering Settings from another screen
 static unsigned long  lastActivity = 0;
 static bool           needsRedraw = true;
 static unsigned long  bootTime = 0;          // millis() at setup() end
 static bool           lightSleepEnabled = false; // TEMPORARILY DISABLED - debugging sleep issue
+static unsigned long  lastTouchOrButtonTime = 0;  // last physical input
 static ReaderRefreshState readerRefresh = {false, false, false, 0};
 
 // ─── Library state ──────────────────────────────────────────────────
@@ -271,7 +272,7 @@ static void drawBookmarksScreen() {
 // ═══════════════════════════════════════════════════════════════════
 
 static void drawSettingsScreen() {
-    ui_settings_draw(settingsFromLibrary);
+    ui_settings_draw(settingsSoftRefreshOnce);
     needsRedraw = false;
 }
 
@@ -313,7 +314,7 @@ static void handleLibraryTouch(int x, int y) {
     }
 
     if (newState == STATE_SETTINGS) {
-        settingsFromLibrary = true;
+        settingsSoftRefreshOnce = true;
         appState = STATE_SETTINGS;
         needsRedraw = true;
         return;
@@ -368,6 +369,9 @@ static void handleSettingsTouch(int x, int y) {
         otaState.updateAvailable = false;
         otaState.latestVersion = "";
     }
+    if (newState == STATE_SETTINGS) {
+        settingsSoftRefreshOnce = true;
+    }
     if (newState == STATE_READER) {
         readerRefresh.fastRefresh = false;
     }
@@ -378,7 +382,13 @@ static void handleSettingsTouch(int x, int y) {
 static void handleOtaTouch(int x, int y) {
     AppState newState = ui_ota_touch(x, y, otaState);
     if (newState != STATE_OTA_CHECK && newState != STATE_WIFI) {
-        lightSleepEnabled = true;  // re-enable light sleep when leaving OTA
+        // Treat this transition as fresh activity so we don't immediately
+        // re-enter the idle path after a long OTA check.
+        lightSleepEnabled = false;
+        lastTouchOrButtonTime = millis();
+    }
+    if (newState == STATE_SETTINGS) {
+        settingsSoftRefreshOnce = true;
     }
     appState = newState;
     needsRedraw = true;
@@ -388,7 +398,13 @@ static void handleWifiTouch(int x, int y) {
     AppState newState = ui_wifi_touch(x, y, books, filteredIndices);
     updateFilteredIndices();
     if (newState != STATE_WIFI && newState != STATE_OTA_CHECK) {
-        lightSleepEnabled = true;  // re-enable light sleep when leaving WiFi/OTA
+        // Reset idle timing after long blocking WiFi flows so the next screen
+        // stays interactive.
+        lightSleepEnabled = false;
+        lastTouchOrButtonTime = millis();
+    }
+    if (newState == STATE_SETTINGS) {
+        settingsSoftRefreshOnce = true;
     }
     appState = newState;
     needsRedraw = true;
@@ -513,7 +529,6 @@ static void enterDeepSleep(bool triggeredByButton) {
 // ═══════════════════════════════════════════════════════════════════
 
 static bool lightSleepConfigured = false;
-static unsigned long lastTouchOrButtonTime = 0;  // last physical input
 static const unsigned long LIGHT_SLEEP_IDLE_MS = 500; // idle before sleeping
 
 static void configureLightSleep() {
