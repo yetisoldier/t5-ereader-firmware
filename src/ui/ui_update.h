@@ -19,8 +19,11 @@ struct OtaState {
 
 // Draw the OTA update screen.
 // Handles all OTA phases (checking, result, downloading, done, failed).
-// May modify otaState (phase transitions during check).
 void ui_ota_draw(OtaState& otaState);
+
+// Advance OTA state machine work that should happen outside the draw path.
+// Runs the blocking update check once when phase == OTA_CHECKING.
+void ui_ota_tick(OtaState& otaState);
 
 // Handle touch on OTA screen.
 // Returns STATE_SETTINGS on back/cancel, STATE_OTA_CHECK otherwise.

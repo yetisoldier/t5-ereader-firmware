@@ -226,7 +226,11 @@ void ui_settings_draw(bool& settingsFromLibrary) {
             display_draw_text(MARGIN_X, baseY, resetLabel, 3);
 
             char verLabel[32];
-            snprintf(verLabel, sizeof(verLabel), "Firmware: v%s", FIRMWARE_VERSION);
+            if (FIRMWARE_VERSION[0] == 'v' || FIRMWARE_VERSION[0] == 'V') {
+                snprintf(verLabel, sizeof(verLabel), "Firmware: %s", FIRMWARE_VERSION);
+            } else {
+                snprintf(verLabel, sizeof(verLabel), "Firmware: v%s", FIRMWARE_VERSION);
+            }
             int vw = display_text_width(verLabel);
             display_draw_text(W - MARGIN_X - vw, baseY, verLabel, 8);
         }

@@ -36,26 +36,7 @@ void ui_ota_draw(OtaState& otaState) {
             display_draw_text((W - mw) / 2, cy, msg, 0);
             drawBottomBar("[ Cancel ]");
             display_update_fast();
-
-            // Perform the check now (blocking but quick)
-            if (WiFi.status() != WL_CONNECTED) {
-                Settings& s = settings_get();
-                WiFi.begin(s.wifiSSID.c_str(), s.wifiPass.c_str());
-                unsigned long start = millis();
-                while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
-                    delay(100);
-                }
-            }
-
-            if (WiFi.status() != WL_CONNECTED) {
-                otaState.phase = OTA_FAILED;
-                otaState.latestVersion = "Connect to WiFi first";
-                return;
-            }
-
-            otaState.updateAvailable = ota_check_for_update(otaState.latestVersion);
-            otaState.phase = OTA_RESULT;
-            return;
+            break;
         }
 
         case OTA_RESULT: {
@@ -138,6 +119,28 @@ void ui_ota_draw(OtaState& otaState) {
         default:
             break;
     }
+}
+
+void ui_ota_tick(OtaState& otaState) {
+    if (otaState.phase != OTA_CHECKING) return;
+
+    if (WiFi.status() != WL_CONNECTED) {
+        Settings& s = settings_get();
+        WiFi.begin(s.wifiSSID.c_str(), s.wifiPass.c_str());
+        unsigned long start = millis();
+        while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
+            delay(100);
+        }
+    }
+
+    if (WiFi.status() != WL_CONNECTED) {
+        otaState.phase = OTA_FAILED;
+        otaState.latestVersion = "Connect to WiFi first";
+        return;
+    }
+
+    otaState.updateAvailable = ota_check_for_update(otaState.latestVersion);
+    otaState.phase = OTA_RESULT;
 }
 
 AppState ui_ota_touch(int x, int y, OtaState& otaState) {

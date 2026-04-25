@@ -107,6 +107,16 @@ static void enterDeepSleep(bool triggeredByButton = false);
 // Drawing helpers
 // ═══════════════════════════════════════════════════════════════════
 
+static const char* display_version_text() {
+    static char verBuf[32];
+    if (FIRMWARE_VERSION[0] == 'v' || FIRMWARE_VERSION[0] == 'V') {
+        snprintf(verBuf, sizeof(verBuf), "%s", FIRMWARE_VERSION);
+    } else {
+        snprintf(verBuf, sizeof(verBuf), "v%s", FIRMWARE_VERSION);
+    }
+    return verBuf;
+}
+
 void drawHeader(const char* title, bool showBattery = true) {
     display_draw_filled_rect(0, 0, W, HEADER_HEIGHT, 2);
     display_draw_text(MARGIN_X, HEADER_HEIGHT - 18, title, 15);
@@ -193,8 +203,7 @@ static void drawGnomeSplash(const char* statusMsg = "Starting up...") {
     int statusW = display_text_width(statusMsg);
     display_draw_text((SPLASH_WIDTH - statusW) / 2, statusY, statusMsg, 4);
 
-    char verStr[32];
-    snprintf(verStr, sizeof(verStr), "v%s", FIRMWARE_VERSION);
+    const char* verStr = display_version_text();
     int vw = display_text_width(verStr);
     display_draw_text((SPLASH_WIDTH - vw) / 2, versionY, verStr, 8);
 
@@ -956,6 +965,11 @@ void loop() {
         }
     }
     lastTouchState = currentTouch;
+
+    if (appState == STATE_OTA_CHECK && otaState.phase == OTA_CHECKING && !needsRedraw) {
+        ui_ota_tick(otaState);
+        needsRedraw = true;
+    }
 
     // Redraw if needed
     if (needsRedraw) {
