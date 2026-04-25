@@ -132,17 +132,9 @@ void ui_reader_draw(BookReader& reader, ReaderRefreshState& refresh) {
             if (y > bodyBottom) break;
 
             if (inline_image_is_marker(line)) {
-                // Render inline image
-                String imgPath; int imgW, imgH, imgLines;
-                if (inline_image_parse_enriched(line, imgPath, imgW, imgH, imgLines)) {
-                    // Center image horizontally in body area
-                    int imgX = marginX + (reader.getTotalPages() > 0 ?
-                               (W - marginX * 2 - imgW) / 2 : 0);
-                    // Image top = current line top (baseline - ascender)
-                    int imgY = y - fontAscender;
-                    inline_image_render(reader.getParser(), imgPath, imgX, imgY, imgW, imgH);
-                    // Advance Y by the image height (continuation lines handle the rest)
-                }
+                // Temporary safety workaround: skip inline image rendering.
+                // The linecache already reserves vertical space via continuation markers,
+                // so advancing by one line here preserves layout well enough for debugging.
                 y += lineH;
             } else if (inline_image_is_continuation(line)) {
                 // Image continuation placeholder — just advance Y
