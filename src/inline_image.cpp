@@ -121,8 +121,8 @@ static int32_t pngFileRead(PNGFILE* pFile, uint8_t* pBuf, int32_t len) {
 }
 
 static int32_t pngFileSeek(PNGFILE* pFile, int32_t position) {
-    if (!pFile || !pFile->fHandle) return -1;
-    return ((File*)pFile->fHandle)->seek(position) ? position : -1;
+    if (!pFile || !pFile->fHandle) return 0;
+    return ((File*)pFile->fHandle)->seek(position) ? position : 0;
 }
 
 static void pngFileClose(void* handle) {
@@ -381,14 +381,6 @@ bool inline_image_render(const String& assetPath,
     if (!isSupportedImage(assetPath) || dstW <= 0 || dstH <= 0) return false;
     if ((int)ESP.getFreeHeap() < 20000) return false;
 
-    // Stability-first guard: PNG inline decode is currently triggering resets
-    // on real hardware. Keep file-backed probing/caching, but fail gracefully
-    // at render time until the PNG path is rewritten more defensively.
-    if (isPng(assetPath)) {
-        debug_trace_mark("inline_image_render:png_blocked", assetPath);
-        return false;
-    }
-
     size_t assetSize = 0;
     if (!file_has_content(assetPath, &assetSize)) return false;
 
@@ -401,21 +393,44 @@ bool inline_image_render(const String& assetPath,
     ctx.lastYieldMs = millis();
     bool ok = false;
 
-    debug_trace_mark("inline_image_render:jpeg", assetPath);
-    JPEGDEC* jpeg = new JPEGDEC();
-    if (!jpeg) return false;
-    if (jpeg->open(assetPath.c_str(), jpegFileOpen, jpegFileClose, jpegFileRead, jpegFileSeek, ijpegDraw)) {
-        ctx.srcW = jpeg->getWidth();
-        ctx.srcH = jpeg->getHeight();
-        if (inline_image_asset_ok(assetSize, ctx.srcW, ctx.srcH, false)) {
-            g_ictx = &ctx;
-            ok = jpeg->decode(0, 0, 0) == 1;
-            g_ictx = nullptr;
-            if (ctx.aborted) debug_trace_mark("inline_image_render:jpeg_timeout", assetPath);
+    if (isJpeg(assetPath)) {
+        debug_trace_mark("inline_image_render:jpeg", assetPath);
+        JPEGDEC jpeg;
+        if (jpeg.open(assetPath.c_str(), jpegFileOpen, jpegFileClose, jpegFileRead, jpegFileSeek, ijpegDraw)) {
+            ctx.srcW = jpeg.getWidth();
+            ctx.srcH = jpeg.getHeight();
+            if (inline_image_asset_ok(assetSize, ctx.srcW, ctx.srcH, false)) {
+                g_ictx = &ctx;
+                ok = jpeg.decode(0, 0, 0) == 1;
+                g_ictx = nullptr;
+                if (ctx.aborted) debug_trace_mark("inline_image_render:jpeg_timeout", assetPath);
+            }
+            jpeg.close();
         }
-        jpeg->close();
+    } else if (isPng(assetPath)) {
+        debug_trace_mark("inline_image_render:png", assetPath);
+        PNG png;
+        if (png.open(assetPath.c_str(), pngFileOpen, pngFileClose, pngFileRead, pngFileSeek, ipngDraw) == PNG_SUCCESS) {
+            ctx.srcW = png.getWidth();
+            ctx.srcH = png.getHeight();
+            if (inline_image_asset_ok(assetSize, ctx.srcW, ctx.srcH, true)) {
+                ctx.pngLineBuf = (uint16_t*)ps_malloc((size_t)ctx.srcW * sizeof(uint16_t));
+                if (ctx.pngLineBuf) {
+                    g_ictx = &ctx;
+                    g_ipng_active = &png;
+                    ok = png.decode(nullptr, 0) == PNG_SUCCESS;
+                    g_ipng_active = nullptr;
+                    g_ictx = nullptr;
+                    if (ctx.aborted) debug_trace_mark("inline_image_render:png_timeout", assetPath);
+                    free(ctx.pngLineBuf);
+                    ctx.pngLineBuf = nullptr;
+                } else {
+                    debug_trace_mark("inline_image_render:png_linebuf_alloc_failed", String(ctx.srcW));
+                }
+            }
+            png.close();
+        }
     }
-    delete jpeg;
 
     debug_trace_mark("inline_image_render:done", ok ? "ok" : "fail");
     return ok;
