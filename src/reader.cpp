@@ -4,6 +4,7 @@
 #include "settings.h"
 #include "storage_utils.h"
 #include "inline_image.h"
+#include "debug_trace.h"
 #include <ArduinoJson.h>
 #include <SD.h>
 #include <Preferences.h>
@@ -29,19 +30,28 @@ static int countWords(const String& text) {
 }
 
 bool BookReader::openBook(const char* filepath) {
+    debug_trace_mark("reader:openBook:start", filepath ? filepath : "");
     closeBook();
-    if (!_parser.open(filepath)) return false;
+    debug_trace_mark("reader:openBook:after_close");
+    if (!_parser.open(filepath)) {
+        debug_trace_mark("reader:openBook:parser_open_failed", filepath ? filepath : "");
+        return false;
+    }
+    debug_trace_mark("reader:openBook:parser_open_ok");
 
     _filepath = String(filepath);
     _title = _parser.getTitle();
     _author = _parser.getAuthor();
 
     recalculateLayout();
+    debug_trace_mark("reader:openBook:after_layout");
     _pageTurnsSinceSave = 0;
     _sessionStartMs = millis();
     _lastTimeUpdateMs = _sessionStartMs;
     loadProgress();
+    debug_trace_mark("reader:openBook:after_loadProgress", String(_currentChapter) + ":" + String(_currentPage));
     loadChapter(_currentChapter);
+    debug_trace_mark("reader:openBook:after_loadChapter", String(_currentChapter));
 
     // Update last-read order (monotonic counter in NVS)
     _prefs.begin("ereader", false);
@@ -112,7 +122,11 @@ void BookReader::closeBook() {
 }
 
 void BookReader::loadChapter(int chapter) {
-    if (chapter < 0 || chapter >= _parser.getChapterCount()) return;
+    debug_trace_mark("reader:loadChapter:start", String(chapter));
+    if (chapter < 0 || chapter >= _parser.getChapterCount()) {
+        debug_trace_mark("reader:loadChapter:invalid", String(chapter));
+        return;
+    }
 
     _currentChapter = chapter;
     _lineOffsets.clear();
@@ -124,7 +138,9 @@ void BookReader::loadChapter(int chapter) {
                   chapter, (int)ESP.getFreeHeap(), (int)ESP.getFreePsram());
     yield();
 
+    debug_trace_mark("reader:loadChapter:before_getText", String(chapter));
     String text = _parser.getChapterText(chapter);
+    debug_trace_mark("reader:loadChapter:after_getText", String(text.length()));
     Serial.printf("Chapter %d: text %d chars (heap: %d)\n",
                   chapter, (int)text.length(), (int)ESP.getFreeHeap());
 
@@ -135,17 +151,22 @@ void BookReader::loadChapter(int chapter) {
 
     _currentChapterWordCount = countWords(text);
 
+    debug_trace_mark("reader:loadChapter:before_wrap", String(text.length()));
     wrapTextToFile(text);
+    debug_trace_mark("reader:loadChapter:after_wrap", String(_totalLines));
     text = String();  // free source text
 
     Serial.printf("Chapter %d: %d lines on SD (heap: %d)\n",
                   chapter, _totalLines, (int)ESP.getFreeHeap());
 
+    debug_trace_mark("reader:loadChapter:before_paginate");
     paginateLines();
     _totalPages = _pages.size();
     if (_totalPages == 0) _totalPages = 1;
     if (_currentPage >= _totalPages) _currentPage = 0;
+    debug_trace_mark("reader:loadChapter:after_paginate", String(_totalPages));
     updatePageLines();
+    debug_trace_mark("reader:loadChapter:after_updatePageLines", String(_currentPage));
     notePageShown();
 }
 
@@ -193,6 +214,7 @@ void BookReader::pushHistoryPoint() {
 }
 
 void BookReader::updatePageLines() {
+    debug_trace_mark("reader:updatePageLines:start", String(_currentPage));
     _currentPageLines.clear();
     if (_currentPage < (int)_pages.size()) {
         const PageRange& pr = _pages[_currentPage];
@@ -212,12 +234,15 @@ void BookReader::updatePageLines() {
             f.close();
             Serial.printf("updatePageLines: read %d lines (heap: %d)\n",
                           (int)_currentPageLines.size(), (int)ESP.getFreeHeap());
+            debug_trace_mark("reader:updatePageLines:read_ok", String(_currentPageLines.size()));
         } else {
             Serial.printf("updatePageLines: FAILED to open %s\n", _lineCachePath.c_str());
+            debug_trace_mark("reader:updatePageLines:file_open_failed", _lineCachePath);
         }
     }
 
     if (_currentPageLines.empty()) {
+        debug_trace_mark("reader:updatePageLines:empty_result", String(_currentPage));
         _currentPageLines.push_back("[No readable text in this section]");
     }
 }
@@ -316,10 +341,10 @@ void BookReader::wrapTextToFile(const String& text) {
                     int lineH = display_font_height() + _lineSpacing;
                     int maxImgH = _linesPerPage * lineH;
                     InlineImageInfo info;
-                    if (inline_image_probe(_parser, imgPath, _maxLineWidth, maxImgH, info)) {
+                    if (inline_image_probe(_parser, _filepath, imgPath, _maxLineWidth, maxImgH, info)) {
                         info.linesConsumed = max(1, (info.displayH + lineH - 1) / lineH);
                         writeLine(f, _lineOffsets, inline_image_build_marker(
-                            info.zipPath, info.displayW, info.displayH, info.linesConsumed));
+                            info.assetPath, info.displayW, info.displayH, info.linesConsumed));
                         _totalLines++;
                         for (int j = 1; j < info.linesConsumed; j++) {
                             writeLine(f, _lineOffsets, IMG_CONT_MARKER);

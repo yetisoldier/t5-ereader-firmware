@@ -12,7 +12,7 @@ class EpubParser;
 #define IMG_CONT_MARKER  "\x01IMGCONT\x01"
 
 struct InlineImageInfo {
-    String zipPath;       // resolved absolute path within ZIP
+    String assetPath;     // extracted cached image path on SD
     int    displayW = 0;  // scaled width for display (pixels)
     int    displayH = 0;  // scaled height for display (pixels)
     int    linesConsumed = 0; // how many text-line slots this image occupies
@@ -24,7 +24,7 @@ bool inline_image_is_marker(const String& line);
 // Check whether a wrapped-line string is an image continuation placeholder.
 bool inline_image_is_continuation(const String& line);
 
-// Parse an enriched marker "\x01IMG|zipPath|w|h|lines\x01" produced by wrapText.
+// Parse an enriched marker "\x01IMG|assetPath|w|h|lines\x01" produced by wrapText.
 // Returns true and fills out* on success.
 bool inline_image_parse_enriched(const String& line, String& outPath,
                                  int& outW, int& outH, int& outLines);
@@ -34,17 +34,16 @@ bool inline_image_parse_enriched(const String& line, String& outPath,
 bool inline_image_parse_raw(const String& line, String& outPath);
 
 // Build an enriched marker string for storage in wrappedLines.
-String inline_image_build_marker(const String& zipPath, int w, int h, int lines);
+String inline_image_build_marker(const String& assetPath, int w, int h, int lines);
 
-// Probe image dimensions from the EPUB ZIP without fully decoding.
-// Loads compressed data into PSRAM, reads JPEG/PNG header, frees.
-// Fills displayW/displayH scaled to fit within maxW x maxH (aspect-ratio preserved).
-// Returns false if the asset is missing, unsupported, or corrupt.
-bool inline_image_probe(EpubParser& parser, const String& zipPath,
+// Extract an EPUB image to SD cache if needed, then probe dimensions without
+// fully decoding it. Fills displayW/displayH scaled to fit within maxW x maxH
+// (aspect-ratio preserved). Returns false if the asset is missing,
+// unsupported, or corrupt.
+bool inline_image_probe(EpubParser& parser, const String& bookPath, const String& zipPath,
                         int maxW, int maxH, InlineImageInfo& out);
 
-// Render an image from the EPUB ZIP at the given portrait-framebuffer position.
-// Loads compressed data into PSRAM, decodes via JPEGDEC/PNGdec scanline
-// callbacks, writes pixels to the display framebuffer, frees data.
-bool inline_image_render(EpubParser& parser, const String& zipPath,
+// Render an extracted cached image file to the portrait framebuffer.
+// Decodes via JPEGDEC/PNGdec file callbacks directly into the display buffer.
+bool inline_image_render(const String& assetPath,
                          int dstX, int dstY, int dstW, int dstH);

@@ -3,6 +3,7 @@
 #include "../settings.h"
 #include "../battery.h"
 #include "../inline_image.h"
+#include "../debug_trace.h"
 #include "../reader.h"
 #include "config.h"
 
@@ -66,16 +67,20 @@ extern void setNeedsRedraw(bool val);
 // ═══════════════════════════════════════════════════════════════════
 
 void ui_reader_draw(BookReader& reader, ReaderRefreshState& refresh) {
+    debug_trace_mark("ui_reader_draw:start", String(reader.getCurrentChapter()) + ":" + String(reader.getCurrentPage()));
     const Settings& s = settings_get();
+    debug_trace_mark("ui_reader_draw:got_settings");
     int level = s.fontSizeLevel;
     if (level < 0) level = 0;
     if (level >= FONT_SIZE_LEVEL_COUNT) level = FONT_SIZE_LEVEL_COUNT - 1;
     display_set_font(level, s.serifFont);
+    debug_trace_mark("ui_reader_draw:after_set_font", String(level));
     int marginX = FONT_MARGIN_X_VALUES[level];
     uint8_t spacingLevel = s.lineSpacingLevel;
     if (spacingLevel >= LINE_SPACING_LEVEL_COUNT) spacingLevel = 2;
 
     display_fill_screen(15);
+    debug_trace_mark("ui_reader_draw:after_fill_screen");
 
     // Minimal header — anchored to HEADER_HEIGHT
     {
@@ -109,12 +114,14 @@ void ui_reader_draw(BookReader& reader, ReaderRefreshState& refresh) {
 
         display_draw_hline(marginX, HEADER_HEIGHT - 4, W - marginX * 2, 13);
     }
+    debug_trace_mark("ui_reader_draw:after_header");
 
     // Page text — body top must be below header divider + font ascender.
     // Use the active reader font metrics here, not the fixed UI font height,
     // or pagination and on-screen drawing drift apart and body text can spill
     // into the footer/progress bar.
     const auto& lines = reader.getPageLines();
+    debug_trace_mark("ui_reader_draw:got_lines", String(lines.size()));
     int bodyTop = HEADER_HEIGHT + MARGIN_Y;  // top edge of body area
     int fontAscender = display_font_ascender();
     int bodyFontH = display_font_height();
@@ -132,9 +139,16 @@ void ui_reader_draw(BookReader& reader, ReaderRefreshState& refresh) {
             if (y > bodyBottom) break;
 
             if (inline_image_is_marker(line)) {
-                // Temporary safety workaround: skip inline image rendering.
-                // The linecache already reserves vertical space via continuation markers,
-                // so advancing by one line here preserves layout well enough for debugging.
+                String imgPath; int imgW, imgH, imgLines;
+                if (inline_image_parse_enriched(line, imgPath, imgW, imgH, imgLines)) {
+                    debug_trace_mark("ui_reader_draw:inline_image", imgPath);
+                    int imgX = marginX + (W - marginX * 2 - imgW) / 2;
+                    int imgY = y - fontAscender;
+                    if (!inline_image_render(imgPath, imgX, imgY, imgW, imgH)) {
+                        display_draw_rect(imgX, imgY, imgW, imgH, 10);
+                        display_draw_text(marginX, y, "[image]", 8);
+                    }
+                }
                 y += lineH;
             } else if (inline_image_is_continuation(line)) {
                 // Image continuation placeholder — just advance Y
@@ -145,6 +159,7 @@ void ui_reader_draw(BookReader& reader, ReaderRefreshState& refresh) {
             }
         }
     }
+    debug_trace_mark("ui_reader_draw:after_body");
 
     // Progress bar
     int barY = H - FOOTER_HEIGHT;
@@ -179,10 +194,12 @@ void ui_reader_draw(BookReader& reader, ReaderRefreshState& refresh) {
         int pw = display_text_width(pgInfo);
         display_draw_text(W - marginX - pw, footY, pgInfo, 8);
     }
+    debug_trace_mark("ui_reader_draw:after_footer");
 
     // Reader uses a CrossPoint-style hybrid: fast localized cleanup for the
     // reading body on ordinary page turns, with periodic stronger body-only
     // cleanup to keep ghosting from accumulating.
+    debug_trace_mark("ui_reader_draw:before_refresh");
     if (refresh.forceFullRefresh) {
         // Full refresh to cleanly replace sleep image on wake resume
         display_update();
@@ -209,6 +226,7 @@ void ui_reader_draw(BookReader& reader, ReaderRefreshState& refresh) {
         refresh.pageTurnsSinceFull = 0;
     }
     setNeedsRedraw(false);
+    debug_trace_mark("ui_reader_draw:done");
 }
 
 // ═══════════════════════════════════════════════════════════════════
