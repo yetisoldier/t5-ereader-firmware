@@ -6,6 +6,16 @@ EPUB reader firmware for the LilyGo T5 4.7 inch ESP32-S3 e-paper board.
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![ESP32-S3](https://img.shields.io/badge/MCU-ESP32--S3-green)](https://www.espressif.com/en/products/socs/esp32-s3)
 
+## Quick Start (Getting Started)
+
+If you are new to this project, follow these steps to get reading:
+
+1. **Hardware**: Ensure you have the [LilyGo T5 4.7 inch V2.3/V2.4](https://github.com/lilygo/LilyGo-T5-4.7) board.
+2. **SD Card**: Format a microSD card to **FAT32**.
+3. **Books**: Create a folder named `/books` on the root of the SD card and copy your `.epub` files into it.
+4. **Flash**: Use PlatformIO to build and upload the firmware (see **Build** below).
+5. **Boot**: Insert the SD card, power on, and the library will load automatically.
+
 ## Status
 
 Current firmware version: **v0.4.5**
